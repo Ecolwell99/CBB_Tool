@@ -162,6 +162,14 @@ button,select,input{font:inherit}
 .seg button:hover{color:var(--tx2)}
 .seg button.on{background:var(--raise);color:var(--tx)}
 
+/* audit toggle — reads as a utility switch, not a view tab */
+.auditbtn{background:var(--inset);border:1px solid var(--line);color:var(--dim);
+          font-size:var(--f0);font-weight:700;text-transform:uppercase;
+          letter-spacing:.05em;padding:4px var(--s2);border-radius:var(--r1);
+          cursor:pointer;margin-right:var(--s2)}
+.auditbtn:hover{color:var(--tx2);border-color:var(--line2)}
+.auditbtn.on{background:#1a2b40;border-color:#2d4a6b;color:#8fbdf0}
+
 /* ---- message strip: the error / success / busy state ---- */
 #msg:empty{display:none}
 .msg{display:flex;align-items:flex-start;gap:var(--s2);font-size:var(--f1);
@@ -246,6 +254,39 @@ select.team{flex:1;min-width:0;font-size:var(--f4);font-weight:700;letter-spacin
 .meter .bv{font-size:var(--f3);font-weight:700;font-variant-numeric:proportional-nums}
 .meter .bk{font-size:9px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;
            opacity:.75}
+
+/* four leaves of the tree — a 2x2 read: made/missed x 2PT/3PT.  Deliberately
+   flat cells, not bars: these are four exclusive outcomes of one attempt, and a
+   bar would invite reading them as a part-to-whole ramp.                       */
+.leaves{display:grid;grid-template-columns:repeat(4,1fr);gap:var(--s1)}
+.leaf{background:var(--inset);border:1px solid var(--line);border-radius:var(--r1);
+      padding:6px var(--s2);display:flex;flex-direction:column;gap:1px;
+      border-left-width:2px}
+.leaf .lk{font-size:9px;letter-spacing:.06em;text-transform:uppercase;
+          font-weight:700;color:var(--dim)}
+.leaf .lv{font-size:var(--f4);font-weight:700;letter-spacing:-.02em;color:var(--tx);
+          font-variant-numeric:proportional-nums}
+.l2m{border-left-color:var(--m2)}
+.l2x{border-left-color:#6b3018}
+.l3m{border-left-color:var(--m3)}
+.l3x{border-left-color:#1d4470}
+.l2x .lv,.l3x .lv{color:var(--tx2)}   /* misses are the quieter half of each pair */
+
+/* audit — dense, monospaced figures, visually separate from the price above */
+.audit{margin-top:var(--s4);padding-top:var(--s3);border-top:1px solid var(--line2)}
+.atitle{font-size:var(--f0);color:var(--dim);margin-bottom:var(--s2);
+        letter-spacing:.03em}
+table.atab{width:100%;font-size:var(--f0);font-variant-numeric:tabular-nums}
+table.atab th{font-size:9px;letter-spacing:.04em;text-transform:uppercase;
+              color:var(--dim2);text-align:right;padding:3px 5px;font-weight:700;
+              border-bottom:1px solid var(--line);white-space:nowrap}
+table.atab td{text-align:right;padding:3px 5px;color:var(--tx2);white-space:nowrap;
+              border-bottom:1px solid var(--line)}
+table.atab th.l,table.atab td.l{text-align:left}
+table.atab td.b{color:var(--tx);font-weight:700}
+table.atab td.gs,table.atab th.gs{border-left:1px solid var(--line)}
+.asum{margin-top:var(--s2);padding-top:var(--s2)}
+.anote{margin-top:6px;font-size:9px;color:var(--dim2);font-style:italic}
 
 .lg{display:flex;flex-wrap:wrap;gap:var(--s3);margin-top:6px;
     font-size:var(--f1);color:var(--tx2)}
@@ -478,6 +519,8 @@ body.busy .board{opacity:.45;pointer-events:none;transition:opacity .15s}
       <div class="vr"></div>
       <div class="crumb" id="crumb"></div>
       <div class="grow"></div>
+      <button class="auditbtn" id="auditBtn" aria-pressed="false"
+              title="Show the per-player probability tree and its identity checks">Audit</button>
       <div class="seg" id="seg">
         <button data-v="both" class="on">Both</button>
         <button data-v="a">Team A</button>
@@ -509,31 +552,108 @@ let uploadInfo = null;           // {file, saved, when, teams, players}
 
 const pct = (x,d=1) => (x*100).toFixed(d) + '%';
 const n1  = x => x.toFixed(1);
+const n0  = x => Math.round(x).toString();
+let audit = false;               // audit view — off by default
 const esc = s => String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 
-/* ================= model =================
-   Each player is a rate per 40 minutes.  All five on the floor share the same 40, so
-   per-40 rates are comparable and sum to a lineup total.  Only ratios matter.
-     3PA freq = sum(3PA)/sum(FGA)      Make% = sum(FGM)/sum(FGA)
-   MIN_FLOOR stops a low-minute player's rates exploding when scaled up.            */
-const MIN_FLOOR = 8;
-function per40(p, mOverride){
+/* ================= model — explicit next-shot probability tree =================
+   This prices ONE field-goal attempt, not a game.  The tree is:
+
+     P(outcome) = Σ  s_i           shooter probability, normalised over the five
+                   × r3_i          that player's 3PA share
+                   × q3_i          ...and his 3P%          -> made 3 / missed 3
+                  (or 1-r3_i, q2_i)                        -> made 2 / missed 2
+
+   The four leaves are mutually exclusive and sum to 1.
+
+   TWO KINDS OF MINUTES, deliberately separated:
+     - HISTORICAL minutes (p.mpg, from Torvik Min%) are evidence.  They convert a
+       per-game count into an on-court attempt RATE, and they set how much we trust
+       that rate.  They belong in the pricing path.
+     - PROJECTED minutes (the editable MIN column, mins[id]) are a rotation opinion.
+       Once a player is on the floor he is on the floor, so projected minutes must
+       NOT move a next-shot price.  They are carried for roster/rotation work and
+       are shown in the audit as ignored.
+
+   SMALL SAMPLES: a hard MIN_FLOOR used to clamp the denominator, which silently
+   decided that a 35-minute player barely shoots (Furphy: 4.3% of next shots).
+   Replaced with empirical-Bayes shrinkage toward the league mean, weighted by how
+   much evidence exists.  A well-sampled player is untouched; a thin one is pulled
+   to average instead of to an arbitrary floor.                                  */
+const SHRINK_K   = 200;    /* minutes at which a player's own rate gets 50% weight */
+const PRIOR_FGA40 = 11.75; /* league mean FGA/40, measured over 874 rated players  */
+
+/* per-game -> per-40 on-court attempt rate, using HISTORICAL minutes only */
+function rawRate40(p){
   if (p.fga === null || p.fga === undefined) return null;
-  const m = mOverride || p.mpg;   // reconstructed rows have no mpg; they stay per-game
-  const k = (m && m > 0) ? 40/Math.max(m, MIN_FLOOR) : 1;
-  return { fga:p.fga*k, fgm:p.fgm*k, tpa:p.tpa*k, noMin:!m };
+  if (!(p.mpg > 0)) return { r40:null, totMin:0, noMin:true };
+  return { r40: p.fga * 40 / p.mpg, totMin: p.mpg * (p.gp || 0), noMin:false };
 }
+
+/* shrink that rate toward the league prior by how many minutes back it */
+function adjRate40(p){
+  const raw = rawRate40(p);
+  if (!raw) return null;
+  if (raw.noMin)                       /* EST rows: no minutes at all -> all prior */
+    return { raw:null, adj:PRIOR_FGA40, totMin:0, conf:0, noMin:true };
+  const conf = raw.totMin / (raw.totMin + SHRINK_K);
+  return { raw:raw.r40, adj: conf*raw.r40 + (1-conf)*PRIOR_FGA40,
+           totMin:raw.totMin, conf, noMin:false };
+}
+
+/* look a player's shooter probability out of a computed tree */
+function probOf(r, id){
+  if (!r || !r.rows) return null;
+  const row = r.rows.find(x=>x.p.id===id);
+  return row ? row.prob : null;
+}
+
+/* per-player conversion split.  Undefined branches (no 3PA taken, or every shot a
+   three) return null and are excluded from that branch rather than counted as 0%. */
+function splitRates(p){
+  const a2 = p.fga - p.tpa, m2 = p.fgm - p.tpm;
+  return {
+    r3: p.fga > 0 ? p.tpa / p.fga : 0,
+    q3: p.tpa > 0.0001 ? p.tpm / p.tpa : null,
+    /* one row in the league implies a negative 2PM; clamp rather than emit < 0 */
+    q2: a2  > 0.0001 ? Math.min(1, Math.max(0, m2 / a2)) : null,
+    neg: a2 > 0.0001 && m2 < -0.0001
+  };
+}
+
+/* mins is accepted and ignored on purpose — see the note above.  Passing it keeps
+   the call sites honest: the projection is available, and deliberately unused.  */
 function calc(players, mins){
-  let fga=0, fgm=0, tpa=0, noMin=0, estFga=0;
+  const rows = [];
   players.forEach(p=>{
-    const r = per40(p, mins[p.id]);
-    if (!r) return;
-    fga+=r.fga; fgm+=r.fgm; tpa+=r.tpa;
-    if (r.noMin) noMin++;
-    if (p.src !== 'torvik') estFga += r.fga;
+    const a = adjRate40(p);
+    if (!a) return;                                  /* no stats at all */
+    rows.push({ p, a, s:splitRates(p), w:a.adj });
   });
-  if (fga <= 0) return null;
-  return { fga, noMin, estShare:estFga/fga, freq3:tpa/fga, make:fgm/fga };
+  const W = rows.reduce((t,x)=>t+x.w, 0);
+  if (!rows.length || W <= 0) return null;
+
+  let m2=0, x2=0, m3=0, x3=0, fga=0, estW=0, noMin=0, thin=0;
+  rows.forEach(row=>{
+    row.prob = row.w / W;                            /* shooter probability */
+    const {r3,q3,q2} = row.s, s = row.prob;
+    /* a branch with an undefined rate contributes attempts but no make/miss split */
+    if (q3 != null){ row.c3m = s*r3*q3;     row.c3x = s*r3*(1-q3); }
+    else           { row.c3m = 0;           row.c3x = s*r3; }
+    if (q2 != null){ row.c2m = s*(1-r3)*q2; row.c2x = s*(1-r3)*(1-q2); }
+    else           { row.c2m = 0;           row.c2x = s*(1-r3); }
+    m3+=row.c3m; x3+=row.c3x; m2+=row.c2m; x2+=row.c2x;
+    fga += row.a.adj;                                /* ΣFGA/40 sanity readout */
+    if (row.p.src !== 'torvik') estW += row.prob;
+    if (row.a.noMin) noMin++;
+    if (row.a.conf < 0.5) thin++;
+  });
+
+  return { rows, fga, noMin, thin, estShare:estW,
+           made2:m2, miss2:x2, made3:m3, miss3:x3,
+           p2a:m2+x2, p3a:m3+x3, make:m2+m3, miss:x2+x3,
+           /* kept for the existing delta/label call sites */
+           freq3:m3+x3 };
 }
 
 /* ================= header status ================= */
@@ -919,6 +1039,22 @@ function Panel(host, initialTeam, label){
       +  '<div class="plot-d">'+deltaHTML(mk, base&&base.make, 'FG%')+'</div>'
       +  '</div>';
 
+    /* The four mutually exclusive leaves of the tree.  This is the level the tool
+       used to stop short of: made-3 CANNOT be read off the two bars above, because
+       3s convert far worse than 2s (mix x make overstates it by ~5pt).           */
+    const leaf = (k,v,cls) =>
+        '<div class="leaf '+cls+'"><span class="lk">'+k+'</span>'
+      + '<span class="lv">'+pct(v,1)+'</span></div>';
+    h += '<div class="plot">'
+      +  '<div class="plot-l"><span class="eyebrow">Next-shot outcome</span>'
+      +    '<span class="rt">mutually exclusive · sums to 100%</span></div>'
+      +  '<div class="leaves">'
+      +    leaf('Made 2',   r.made2, 'l2m')
+      +    leaf('Missed 2', r.miss2, 'l2x')
+      +    leaf('Made 3',   r.made3, 'l3m')
+      +    leaf('Missed 3', r.miss3, 'l3x')
+      +  '</div></div>';
+
     /* secondary: sanity + provenance.  Compact single strip — the "in range"
        pill only earns its ink when something is actually off.                 */
     const bad = r.fga<40||r.fga>85;
@@ -926,12 +1062,75 @@ function Panel(host, initialTeam, label){
       +  '<span class="it">'+on.size+'/5 selected</span>'
       +  '<span class="it'+(bad?' bad':'')+'">'+n1(r.fga)+' FGA/40'
       +    (bad?'<span class="pill p-bad">check minutes</span>':'')+'</span>';
+    if (r.thin) h += '<span class="it bad">'+r.thin+' thin sample</span>';
     if (r.estShare>0.005) h += '<span class="it">'+pct(r.estShare,0)+' est.</span>';
     if (r.noMin)          h += '<span class="it">'+r.noMin+' no min</span>';
     h += '</div>';
 
+    h += auditBlock(r);
     h += '</div></div>';
     h += notes(sel,r);
+    return h;
+  }
+
+  /* ---- AUDIT — off by default, one row per selected player ---------------
+     Every number the tree used, plus the three identities.  Present so the
+     price can be reconstructed by hand from the display alone.            */
+  function auditBlock(r){
+    if (!audit) return '';
+    let h = '<div class="audit">'
+      + '<div class="atitle">Audit · '
+      +   'shooter prob = adjusted FGA/40 normalised over the five · '
+      +   'K=' + SHRINK_K + ' min, prior=' + PRIOR_FGA40 + ' FGA/40</div>'
+      + '<div class="cbd-flush"><table class="atab"><thead><tr>'
+      + '<th class="l">Player</th><th>Hist min</th><th>Raw /40</th><th>Adj /40</th>'
+      + '<th>Conf</th><th class="gs">Shooter</th><th>3PA sh</th><th>2P%</th><th>3P%</th>'
+      + '<th class="gs">→made2</th><th>→miss2</th><th>→made3</th><th>→miss3</th>'
+      + '</tr></thead><tbody>';
+
+    r.rows.forEach(x=>{
+      const a=x.a, s=x.s;
+      const proj = mins[x.p.id];
+      h += '<tr>'
+        + '<td class="l">'+esc(x.p.name)
+        +   (a.conf<0.5?' <span class="badge b-wn" title="thin sample — rate pulled toward the league prior">THIN</span>':'')
+        +   (proj!==undefined?' <span class="badge b-est" title="projected MIN '+proj+' is ignored for pricing">PROJ</span>':'')
+        + '</td>'
+        + '<td>'+(a.noMin?'—':n0(a.totMin))+'</td>'
+        + '<td>'+(a.raw==null?'—':n1(a.raw))+'</td>'
+        + '<td>'+n1(a.adj)+'</td>'
+        + '<td>'+a.conf.toFixed(2)+'</td>'
+        + '<td class="gs b">'+pct(x.prob,1)+'</td>'
+        + '<td>'+pct(s.r3,0)+'</td>'
+        + '<td>'+(s.q2==null?'n/a':pct(s.q2,1))+(s.neg?' <span class="badge b-wn" title="sheet implies negative 2PM; clamped to 0">!</span>':'')+'</td>'
+        + '<td>'+(s.q3==null?'n/a':pct(s.q3,1))+'</td>'
+        + '<td class="gs">'+pct(x.c2m,2)+'</td>'
+        + '<td>'+pct(x.c2x,2)+'</td>'
+        + '<td>'+pct(x.c3m,2)+'</td>'
+        + '<td>'+pct(x.c3x,2)+'</td>'
+        + '</tr>';
+    });
+
+    /* identities — computed from the displayed parts, not restated from calc */
+    const sProb = r.rows.reduce((t,x)=>t+x.prob,0);
+    const four  = r.made2+r.miss2+r.made3+r.miss3;
+    const att   = r.p2a+r.p3a;
+    const mkms  = r.make+r.miss;
+    const chk = (label,v)=>{
+      const ok = Math.abs(v-1) < 1e-9;
+      return '<span class="it"><span class="pill '+(ok?'p-ok':'p-bad')+'">'
+           + (ok?'OK':'FAIL')+'</span>'+label+' '+(v*100).toFixed(6)+'%</span>';
+    };
+    h += '</tbody></table></div>'
+      +  '<div class="sub asum">'
+      +    chk('Σ shooter prob', sProb)
+      +    chk('4 outcomes', four)
+      +    chk('2PA+3PA', att)
+      +    chk('make+miss', mkms)
+      +  '</div>'
+      +  '<div class="anote">Projected MIN edits do not enter this table — once a '
+      +    'player is on the floor, pricing uses his historical on-court rate only.</div>'
+      +  '</div>';
     return h;
   }
 
@@ -950,7 +1149,12 @@ function Panel(host, initialTeam, label){
       out.push(['w','<b>'+pct(r.estShare,0)+'</b> of lineup FGA is estimated from the sheet '
         + '(±~3pts on frequency).']);
     if (r && r.noMin)
-      out.push(['w', r.noMin+' player'+(r.noMin>1?'s':'')+' lack minutes — counted per-game.']);
+      out.push(['w', r.noMin+' player'+(r.noMin>1?'s':'')+' lack historical minutes — '
+        + 'attempt rate falls back to the league prior ('+PRIOR_FGA40+' FGA/40).']);
+    if (r && r.thin)
+      out.push(['w','<b>'+r.thin+' thin sample'+(r.thin>1?'s':'')+'</b> — under '+SHRINK_K
+        + ' historical minutes, so the attempt rate is pulled toward the league average. '
+        + 'Shot-type accuracy is NOT shrunk and stays noisy on small samples.']);
     warns.forEach(p=>out.push(['e','<b>'+esc(p.name)+'</b> — '+esc(p.warn)]));
     if (!out.length) return '';
     return '<div class="notes">'
@@ -969,8 +1173,8 @@ function Panel(host, initialTeam, label){
     for (let i=0;i<5;i++){
       const p=ordered[i];
       if (p){
-        const r40=per40(p,mins[p.id]);
-        const share=(r&&r40)? pct(r40.fga/r.fga,0) : '—';
+        const pr=probOf(r,p.id);
+        const share=(pr!=null)? pct(pr,0) : '—';
         const f3 = p.fga>0 ? pct(p.tpa/p.fga,0) : '—';
         h += '<div class="slot filled" data-drop="'+p.id+'" title="Remove '+esc(p.name)+'">'
           +  '<span class="snr"><span class="sp">'+esc(p.slot)+'</span>'
@@ -994,7 +1198,8 @@ function Panel(host, initialTeam, label){
       + '<th class="l">Player</th><th>Yr</th>'
       + '<th class="gs">Min</th>'
       + '<th class="gs">3PA%</th><th>FG%</th><th>3P%</th>'
-      + '<th class="gs">Share</th></tr></thead><tbody>';
+      + '<th class="gs" title="probability this player takes the next team FGA">'
+      +   'Next FGA share</th></tr></thead><tbody>';
     let last=null;
     team.players.forEach(p=>{
       if (p.kind!==last){
@@ -1010,8 +1215,9 @@ function Panel(host, initialTeam, label){
 
   function row(p,r){
     const sel=on.has(p.id);
-    const r40=per40(p,mins[p.id]);
-    const share=(sel&&r&&r40)? r40.fga/r.fga : null;
+    /* shooter probability comes straight from the tree, so the table can never
+       disagree with the price above it */
+    const share=(sel&&r)? probOf(r,p.id) : null;
     let badge='';
     if (p.src==='sheet') badge='<span class="badge b-est" title="'+esc(p.why)+'">EST</span>';
     if (p.src==='none')  badge='<span class="badge b-no" title="no college stats on file">NO DATA</span>';
@@ -1051,7 +1257,7 @@ function Panel(host, initialTeam, label){
   bReset.onclick = reset;
   load(initialTeam);
 
-  return { name: () => team && team.name };
+  return { name: () => team && team.name, render: () => { if (team) render(); } };
 }
 
 /* ================= mount ================= */
@@ -1079,6 +1285,15 @@ document.getElementById('seg').addEventListener('click', ev=>{
   board.classList.remove('only-a','only-b');
   if (b.dataset.v==='a') board.classList.add('only-a');
   if (b.dataset.v==='b') board.classList.add('only-b');
+});
+
+document.getElementById('auditBtn').addEventListener('click', ev=>{
+  audit = !audit;
+  const b = ev.currentTarget;
+  b.classList.toggle('on', audit);
+  b.setAttribute('aria-pressed', audit ? 'true' : 'false');
+  if (panelA) panelA.render();
+  if (panelB) panelB.render();
 });
 
 paintStatus();
