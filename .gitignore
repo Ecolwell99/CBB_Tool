@@ -1,0 +1,13 @@
+# The roster workbook is not ours -- never commit it.
+*.xlsx
+*.xlsm
+
+# Local backup of the pre-rebuild UI.
+index.html.bak
+
+# Raw Torvik pull (~2MB). data.js and index_torvik.js are the derived files the
+# app actually loads, so those ARE committed -- the app cannot start without them.
+torvik_2026.csv
+
+# Build/validator scratch output.
+audit.csv

@@ -1,0 +1,1055 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>CBB Lineup Lab — Shot Mix</title>
+<style>
+/* ============================================================================
+   TOKENS
+   Chart colours are NOT eyeballed.  The four marks were validated with the
+   dataviz palette validator against this page's own card surface (#14181d),
+   dark mode:  lightness band, chroma floor, all-pairs CVD separation
+   (worst ΔE 9.4 deutan), normal-vision floor (20.9), contrast vs surface.
+   The previous values (#4a9eda / #d98a3d / #333a43) failed three of those
+   gates — do not revert them without re-running the validator.
+   ========================================================================= */
+:root{
+  /* --- surfaces: page < card < inset < raised --- */
+  --bg:#0b0e11; --card:#14181d; --inset:#1a1f26; --raise:#212832;
+  --line:#232932; --line2:#2e3641; --line3:#3a434f;
+
+  /* --- ink --- */
+  --tx:#e9edf2; --tx2:#a8b2be; --dim:#7d8794; --dim2:#5b6472;
+
+  /* --- data marks (validated; see header note) --- */
+  --m3:#3987e5;          /* 3PA  — categorical slot 1 */
+  --m2:#d95926;          /* 2PA  — categorical slot 2 */
+  --mk:#199e70;          /* make — meter fill        */
+  --mk-track:#1d6b4e;    /* make — meter track, same hue ramp */
+
+  /* --- status (reserved; never used as a series colour) --- */
+  --good:#0ca30c; --warn:#fab219; --serious:#ec835a; --crit:#d03b3b;
+  --acc:#3987e5;         /* selection / focus */
+
+  /* --- type scale --- */
+  --f0:10px; --f1:11px; --f2:12px; --f3:13px; --f4:15px; --f5:22px;
+  --ui:"Segoe UI",system-ui,-apple-system,sans-serif;
+
+  /* --- spacing: 4px scale, used everywhere --- */
+  --s0:2px; --s1:4px; --s2:8px; --s3:12px; --s4:16px; --s5:20px; --s6:24px; --s7:32px;
+  --r1:3px; --r2:5px; --r3:8px;
+
+  /* --- shell --- */
+  --sb:196px; --top:44px; --nav:38px;
+}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;background:var(--bg);color:var(--tx);
+     font:var(--f3)/1.45 var(--ui);-webkit-font-smoothing:antialiased}
+
+/* columns of numbers align; standalone display numbers use proportional figures */
+table,.mono{font-variant-numeric:tabular-nums}
+.kpi-v{font-variant-numeric:proportional-nums}
+
+.eyebrow{font-size:var(--f0);letter-spacing:.08em;text-transform:uppercase;
+         font-weight:700;color:var(--dim)}
+
+::-webkit-scrollbar{width:10px;height:10px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:#2b323b;border:2px solid var(--bg);border-radius:5px}
+::-webkit-scrollbar-thumb:hover{background:#3d4653}
+::selection{background:#1e3a63;color:#fff}
+:focus-visible{outline:2px solid var(--acc);outline-offset:1px}
+button,select,input{font:inherit}
+
+/* ============================================================================
+   APP SHELL
+   ========================================================================= */
+.app{display:grid;grid-template-columns:var(--sb) 1fr;height:100vh;overflow:hidden}
+
+.sidebar{background:var(--card);border-right:1px solid var(--line);
+         display:flex;flex-direction:column;overflow:hidden}
+.brand{height:var(--top);flex:none;display:flex;align-items:center;gap:var(--s2);
+       padding:0 var(--s4);border-bottom:1px solid var(--line)}
+.mark{width:24px;height:24px;flex:none;border-radius:var(--r2);
+      background:linear-gradient(150deg,#3f76b3,#233850);
+      display:flex;align-items:center;justify-content:center;
+      font-size:9px;font-weight:800;color:#dce8f5}
+.brand .bn{display:flex;flex-direction:column;line-height:1.15;min-width:0}
+.brand .bn b{font-size:var(--f2);font-weight:700;letter-spacing:.01em;white-space:nowrap}
+.brand .bn i{font-size:9px;color:var(--dim2);letter-spacing:.07em;
+             text-transform:uppercase;font-style:normal}
+
+.sbody{flex:1;overflow-y:auto;padding:var(--s4) var(--s2) var(--s5)}
+.sgrp{margin-bottom:var(--s5)}
+.sgrp>.eyebrow{padding:0 var(--s2);margin-bottom:var(--s2)}
+.navitem{display:flex;align-items:center;gap:var(--s2);padding:7px var(--s2);
+         border-radius:var(--r1);font-size:var(--f2);color:var(--tx2);
+         border-left:2px solid transparent}
+.navitem.on{background:var(--inset);color:var(--tx);font-weight:600;border-left-color:var(--acc)}
+.navitem .gl{width:14px;text-align:center;font-size:var(--f1);color:var(--dim2)}
+.navitem.on .gl{color:var(--acc)}
+
+/* legend: identity always available as text + swatch, never colour alone */
+.legend{padding:0 var(--s2);display:flex;flex-direction:column;gap:6px}
+.lrow{display:flex;align-items:center;gap:var(--s2);font-size:var(--f1);color:var(--tx2)}
+.sw{width:10px;height:10px;border-radius:2px;flex:none}
+.sw-tr{background:var(--mk-track)}
+.badge{font-size:9px;padding:1px 5px;border-radius:3px;font-weight:700;flex:none;
+       letter-spacing:.03em}
+
+.sfoot{flex:none;border-top:1px solid var(--line);padding:var(--s3) var(--s4);
+       font-size:var(--f0);color:var(--dim2);line-height:1.6}
+.sfoot b{color:var(--tx2);font-weight:600}
+
+.main{display:flex;flex-direction:column;min-width:0;overflow:hidden}
+
+/* ---- top bar: global inputs (data source) ---- */
+.top{flex:none;height:var(--top);display:flex;align-items:center;gap:var(--s3);
+     padding:0 var(--s4);background:var(--card);border-bottom:1px solid var(--line)}
+.top h1{font-size:var(--f2);margin:0;font-weight:700;letter-spacing:.02em;
+        text-transform:uppercase;color:var(--dim);white-space:nowrap}
+.vr{width:1px;height:18px;background:var(--line);flex:none}
+.grow{margin-left:auto}
+
+.drop{display:flex;align-items:center;gap:7px;padding:5px var(--s2);border-radius:var(--r1);
+      border:1px dashed var(--line2);background:var(--inset);cursor:pointer;
+      transition:border-color .12s,background .12s}
+.drop:hover{border-color:var(--dim2);background:var(--raise)}
+.drop.hot{border-color:var(--acc);background:#16233a;border-style:solid}
+.drop b{font-size:var(--f1);font-weight:600;white-space:nowrap}
+.drop i{font-size:var(--f0);color:var(--dim2);font-style:normal;white-space:nowrap}
+
+.stat{display:flex;align-items:center;gap:6px;font-size:var(--f1);white-space:nowrap;
+      background:var(--inset);border:1px solid var(--line);border-radius:var(--r1);
+      padding:4px var(--s2);overflow:hidden}
+.stat:empty{display:none}
+.stat .dot{width:6px;height:6px;border-radius:50%;flex:none}
+.d-ok{background:var(--good)} .d-up{background:var(--acc)} .d-old{background:var(--warn)}
+.stat .k{color:var(--dim2);overflow:hidden;text-overflow:ellipsis}
+.stat .v{color:var(--tx);font-weight:600}
+
+.btn{background:var(--inset);color:var(--tx2);border:1px solid var(--line);
+     border-radius:var(--r1);padding:5px 10px;font-size:var(--f1);cursor:pointer;
+     white-space:nowrap;transition:color .12s,border-color .12s,background .12s}
+.btn:hover{color:var(--tx);border-color:var(--line2);background:var(--raise)}
+.btn-xs{padding:3px var(--s2);font-size:var(--f0);text-transform:uppercase;
+        letter-spacing:.05em;font-weight:700}
+
+/* ---- nav bar: view context + layout control ---- */
+.navbar{flex:none;height:var(--nav);display:flex;align-items:center;gap:var(--s3);
+        padding:0 var(--s4);background:var(--bg);border-bottom:1px solid var(--line)}
+.tabs{display:flex;align-items:stretch;height:100%;gap:var(--s1)}
+.tab{display:flex;align-items:center;padding:0 var(--s1);font-size:var(--f2);
+     color:var(--dim);border-bottom:2px solid transparent;margin-bottom:-1px}
+.tab.on{color:var(--tx);font-weight:600;border-bottom-color:var(--acc)}
+.crumb{font-size:var(--f1);color:var(--dim2);display:flex;align-items:center;gap:7px;
+       min-width:0;overflow:hidden}
+.crumb b{color:var(--tx2);font-weight:600;white-space:nowrap;
+         overflow:hidden;text-overflow:ellipsis}
+.crumb .vs{color:var(--dim2);font-size:var(--f0);text-transform:uppercase;letter-spacing:.06em}
+
+/* segmented control — presentation only, changes no numbers */
+.seg{display:flex;background:var(--inset);border:1px solid var(--line);
+     border-radius:var(--r1);padding:2px;gap:2px}
+.seg button{background:none;border:0;color:var(--dim);font-size:var(--f0);
+            font-weight:700;text-transform:uppercase;letter-spacing:.05em;
+            padding:3px var(--s2);border-radius:2px;cursor:pointer}
+.seg button:hover{color:var(--tx2)}
+.seg button.on{background:var(--raise);color:var(--tx)}
+
+/* ---- message strip: the error / success / busy state ---- */
+#msg:empty{display:none}
+.msg{display:flex;align-items:flex-start;gap:var(--s2);font-size:var(--f1);
+     padding:7px var(--s4);line-height:1.5;border-bottom:1px solid var(--line)}
+.msg .ic{flex:none;font-weight:700;font-size:var(--f2);line-height:1.3}
+.m-ok{background:#12241a;color:#a5d7b7}    .m-ok .ic{color:var(--good)}
+.m-err{background:#251a1a;color:#e3b2b2}   .m-err .ic{color:var(--crit)}
+.m-busy{background:#161f2e;color:#b6c4dd}  .m-busy .ic{color:var(--acc)}
+
+.scroll{flex:1;overflow-y:auto;min-height:0}
+
+/* ============================================================================
+   BOARD — two team columns
+   ========================================================================= */
+.board{display:grid;grid-template-columns:1fr 1fr;gap:0;align-items:start}
+.board.only-a,.board.only-b{grid-template-columns:1fr}
+.board.only-a #B,.board.only-b #A{display:none}
+.col{min-width:0;padding:var(--s4) var(--s4) var(--s7);display:flex;
+     flex-direction:column;gap:var(--s3)}
+.col+.col{border-left:1px solid var(--line)}
+
+/* ---- card: one recipe for every block ---- */
+.card{background:var(--card);border:1px solid var(--line);border-radius:var(--r2)}
+.chd{display:flex;align-items:center;gap:var(--s2);padding:var(--s2) var(--s3);
+     border-bottom:1px solid var(--line);min-height:34px}
+.chd .eyebrow{white-space:nowrap}
+.chd .r{margin-left:auto;display:flex;align-items:center;gap:var(--s2)}
+.cbd{padding:var(--s3)}
+.cbd-flush{padding:0}
+
+/* ---- INPUT zone: team picker ---- */
+.teamrow{display:flex;gap:var(--s2);align-items:center}
+select,input[type=number]{background:var(--inset);color:var(--tx);
+  border:1px solid var(--line);border-radius:var(--r1);padding:6px var(--s2);
+  font-size:var(--f2);transition:border-color .12s,background .12s}
+select:hover,input[type=number]:hover{border-color:var(--line2)}
+select:focus,input:focus{outline:none;border-color:var(--acc);background:var(--raise)}
+select.team{flex:1;min-width:0;font-size:var(--f4);font-weight:700;letter-spacing:-.01em}
+
+/* ============================================================================
+   ANALYSIS — primary KPIs, then the two plots, then secondary footer
+   ========================================================================= */
+.kpis{display:grid;grid-template-columns:1fr 1fr;gap:var(--s3)}
+.kpi{display:flex;flex-direction:column;gap:3px;min-width:0}
+.kpi+.kpi{padding-left:var(--s3);border-left:1px solid var(--line)}
+.kpi-l{display:flex;align-items:center;gap:6px;font-size:var(--f0);
+       letter-spacing:.07em;text-transform:uppercase;font-weight:700;color:var(--dim)}
+.kpi-v{font-size:var(--f5);font-weight:650;letter-spacing:-.02em;line-height:1.05;color:var(--tx)}
+.kpi-d{font-size:var(--f1);color:var(--dim2);display:flex;align-items:center;gap:4px}
+.kpi-d.up{color:#63c98f} .kpi-d.dn{color:#e39191}
+.kpi-d .ar{font-size:9px}
+
+/* plots ------------------------------------------------------------------- */
+.plot+.plot{margin-top:var(--s3)}
+.plot-l{display:flex;align-items:baseline;gap:var(--s2);margin-bottom:5px}
+.plot-l .eyebrow{white-space:nowrap}
+.plot-l .rt{margin-left:auto;font-size:var(--f1);color:var(--dim2)}
+
+/* stacked bar: 2px surface gap does the separating, 4px rounded outer ends */
+.mix{display:flex;height:22px;gap:2px;background:var(--card)}
+.mix>span{display:flex;align-items:center;justify-content:center;
+          font-size:var(--f1);font-weight:700;overflow:hidden;white-space:nowrap;
+          transition:width .18s ease-out}
+.mix>span:first-child{border-radius:var(--r1) 0 0 var(--r1)}
+.mix>span:last-child{border-radius:0 var(--r1) var(--r1) 0}
+.seg2{background:var(--m2);color:#1b0d05}
+.seg3{background:var(--m3);color:#06121f}
+
+/* meter: one ratio against a whole — fill + lighter/darker step of same ramp */
+.meter{height:12px;border-radius:var(--r1);background:var(--mk-track);overflow:hidden}
+.meter>span{display:block;height:100%;background:var(--mk);
+            border-radius:var(--r1) 0 0 var(--r1);transition:width .18s ease-out}
+.meter.full>span{border-radius:var(--r1)}
+
+.lg{display:flex;flex-wrap:wrap;gap:var(--s3);margin-top:6px;
+    font-size:var(--f1);color:var(--tx2)}
+.lg span{display:flex;align-items:center;gap:5px}
+
+/* secondary metric strip — deliberately quieter than the KPIs above it */
+.sub{display:flex;flex-wrap:wrap;align-items:center;gap:var(--s3);
+     margin-top:var(--s3);padding-top:var(--s2);border-top:1px solid var(--line);
+     font-size:var(--f0);color:var(--dim2)}
+.sub .it{display:flex;align-items:center;gap:5px}
+.sub .it b{color:var(--tx2);font-size:var(--f1);font-weight:650}
+.sub .it.bad b{color:#e39191}
+.pill{font-size:9px;padding:1px 5px;border-radius:3px;font-weight:700;
+      letter-spacing:.03em;border:1px solid}
+.p-ok{color:#63c98f;border-color:#20402d;background:#12241a}
+.p-bad{color:#e39191;border-color:#3f2626;background:#241818}
+
+/* ============================================================================
+   LINEUP CONSTRUCTION — five explicit slots
+   ========================================================================= */
+.slots{display:grid;grid-template-columns:repeat(5,1fr);gap:var(--s1)}
+.slot{background:var(--inset);border:1px solid var(--line);border-radius:var(--r1);
+      padding:6px;min-width:0;display:flex;flex-direction:column;gap:2px;
+      min-height:46px;justify-content:center}
+.slot.filled{background:var(--raise);border-color:var(--line2);cursor:pointer}
+.slot.filled:hover{border-color:var(--crit)}
+.slot.filled:hover .sn{color:#e39191}
+.slot.empty{border-style:dashed;align-items:center;justify-content:center}
+.slot .sn{font-size:var(--f1);font-weight:650;color:var(--tx);white-space:nowrap;
+          overflow:hidden;text-overflow:ellipsis;line-height:1.25}
+.slot .sm{font-size:9px;color:var(--dim2);display:flex;gap:5px;white-space:nowrap}
+.slot .ph{font-size:var(--f0);color:var(--dim2);letter-spacing:.05em;text-transform:uppercase}
+
+/* ============================================================================
+   ROSTER TABLE — dense, column-grouped
+   ========================================================================= */
+table{width:100%;border-collapse:separate;border-spacing:0}
+thead th{position:sticky;top:0;z-index:2;background:var(--inset);
+  font-size:var(--f0);letter-spacing:.05em;text-transform:uppercase;font-weight:700;
+  color:var(--dim);text-align:right;padding:5px var(--s2);white-space:nowrap;
+  border-bottom:1px solid var(--line2)}
+th.l,td.l{text-align:left}
+/* vertical rules mark the column groups: identity | input | rates | contribution */
+th.gs,td.gs{border-left:1px solid var(--line)}
+td{padding:4px var(--s2);text-align:right;font-size:var(--f2);
+   border-bottom:1px solid var(--line);color:var(--tx2)}
+tbody tr:last-child td{border-bottom:0}
+td.pl{color:var(--tx)}
+tr.grp td{padding:0;height:0;border-bottom:0}
+tr.grp th{position:static;background:var(--bg);color:var(--dim2);
+  font-size:9px;padding:4px var(--s2);text-align:left;border-top:1px solid var(--line);
+  border-bottom:1px solid var(--line)}
+
+tr.pick{cursor:pointer}
+tr.pick:hover td{background:#1b212a}
+/* selected: accent rail + tint + weight — three channels, not colour alone */
+tr.sel td{background:#182234}
+tr.sel:hover td{background:#1b2740}
+tr.sel td.l{box-shadow:inset 2px 0 0 var(--acc)}
+tr.sel td.pl{color:#fff;font-weight:650}
+tr.nostat td{color:var(--dim2)}
+
+.pn{display:flex;align-items:center;gap:6px;min-width:0}
+.box{width:12px;height:12px;flex:none;border-radius:2px;border:1px solid var(--line2);
+     background:var(--card);position:relative}
+tr.sel .box{background:var(--acc);border-color:var(--acc)}
+tr.sel .box::after{content:'';position:absolute;left:3px;top:1px;width:4px;height:7px;
+     border:solid #08121f;border-width:0 1.5px 1.5px 0;transform:rotate(42deg)}
+.pnm{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pos{font-size:9px;color:var(--dim2);font-weight:700;min-width:15px;flex:none}
+.b-est{background:#2b220c;color:#e0b95c;border-color:#463813}
+.b-no{background:#2b1616;color:#e08a8a;border-color:#452525}
+.b-wn{background:#2b1616;color:#e08a8a;border-color:#452525}
+input.mm{width:44px;text-align:right;font-size:var(--f1);padding:2px var(--s1)}
+input.mm::-webkit-outer-spin-button,input.mm::-webkit-inner-spin-button{
+  -webkit-appearance:none;margin:0}
+input.mm{-moz-appearance:textfield}
+
+/* ============================================================================
+   STATES — empty, loading, notices
+   ========================================================================= */
+.empty{padding:var(--s5) var(--s3);text-align:center;color:var(--dim2)}
+.empty .eg{font-size:18px;color:var(--line3);margin-bottom:var(--s2)}
+.empty .et{font-size:var(--f2);color:var(--tx2);font-weight:600;margin-bottom:3px}
+.empty .es{font-size:var(--f1);color:var(--dim2);line-height:1.5;
+           max-width:34ch;margin:0 auto}
+
+.notes{display:flex;flex-direction:column;gap:1px}
+.note{display:flex;gap:var(--s2);align-items:flex-start;font-size:var(--f1);
+      padding:6px var(--s3);line-height:1.5;color:var(--tx2);
+      border-left:2px solid var(--line2);background:var(--inset)}
+.note .ic{flex:none;font-weight:700;color:var(--dim)}
+.note.w{border-left-color:var(--warn)}      .note.w .ic{color:var(--warn)}
+.note.e{border-left-color:var(--crit);background:#241818;color:#e3b2b2}
+.note.e .ic{color:var(--crit)}
+.note b{color:var(--tx);font-weight:650}
+
+/* loading: skeleton shimmer while a workbook is parsed */
+.skel{height:10px;border-radius:3px;background:linear-gradient(90deg,
+      var(--inset) 0%,var(--raise) 50%,var(--inset) 100%);
+      background-size:200% 100%;animation:sh 1.1s linear infinite}
+@keyframes sh{0%{background-position:200% 0}100%{background-position:-200% 0}}
+body.busy .board{opacity:.45;pointer-events:none;transition:opacity .15s}
+
+/* ============================================================================
+   RESPONSIVE
+   ========================================================================= */
+@media(max-width:1180px){
+  :root{--sb:172px}
+  .col{padding:var(--s3) var(--s3) var(--s6)}
+  .kpi-v{font-size:19px}
+}
+/* stack the two teams; keep the sidebar */
+@media(max-width:960px){
+  .board{grid-template-columns:1fr}
+  .col+.col{border-left:0;border-top:1px solid var(--line)}
+  .slots{grid-template-columns:repeat(3,1fr)}
+}
+/* collapse the sidebar to an icon rail */
+@media(max-width:780px){
+  :root{--sb:52px}
+  .brand .bn,.sbody,.sfoot{display:none}
+  .brand{justify-content:center;padding:0}
+  .top h1{display:none}
+  .stat .k{display:none}
+}
+@media(max-width:560px){
+  .app{grid-template-columns:1fr}
+  .sidebar{display:none}
+  .top,.navbar{padding:0 var(--s3)}
+  .drop i{display:none}
+  .kpis{grid-template-columns:1fr}
+  .kpi+.kpi{padding-left:0;border-left:0;padding-top:var(--s3);
+            border-top:1px solid var(--line)}
+  .slots{grid-template-columns:repeat(2,1fr)}
+  .crumb{display:none}
+}
+@media(prefers-reduced-motion:reduce){
+  *{animation-duration:.01ms!important;transition-duration:.01ms!important}
+}
+</style>
+</head>
+<body>
+<div class="app">
+
+  <!-- ============================ SIDEBAR ============================ -->
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="mark">CBB</div>
+      <div class="bn"><b>Lineup Lab</b><i>Shot Mix</i></div>
+    </div>
+
+    <div class="sbody">
+      <div class="sgrp">
+        <div class="eyebrow">Analysis</div>
+        <div class="navitem on"><span class="gl">◧</span>Matchup</div>
+      </div>
+
+      <div class="sgrp">
+        <div class="eyebrow">Shot mix</div>
+        <div class="legend">
+          <div class="lrow"><span class="sw" style="background:var(--m2)"></span>2PA share</div>
+          <div class="lrow"><span class="sw" style="background:var(--m3)"></span>3PA share</div>
+        </div>
+      </div>
+
+      <div class="sgrp">
+        <div class="eyebrow">Make rate</div>
+        <div class="legend">
+          <div class="lrow"><span class="sw" style="background:var(--mk)"></span>Made</div>
+          <div class="lrow"><span class="sw sw-tr"></span>Attempted</div>
+        </div>
+      </div>
+
+      <div class="sgrp">
+        <div class="eyebrow">Data flags</div>
+        <div class="legend">
+          <div class="lrow"><span class="badge b-est">EST</span>Rebuilt from sheet</div>
+          <div class="lrow"><span class="badge b-no">NO DATA</span>No stats on file</div>
+          <div class="lrow"><span class="badge b-wn">!</span>Check the match</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="sfoot">
+      Rates are <b>per 40 min</b>.<br>
+      Mix from the lineup,<br>accuracy from the player.<br>
+      <b>Deltas</b> beat levels.
+    </div>
+  </aside>
+
+  <!-- ============================= MAIN ============================== -->
+  <div class="main">
+
+    <!-- top bar: data source inputs -->
+    <div class="top">
+      <h1>Lineup Shot Mix</h1>
+      <div class="vr"></div>
+
+      <label class="drop" id="drop">
+        <b>Upload roster</b>
+        <i>.xlsx — drop or click</i>
+        <input type="file" id="file" accept=".xlsx,.xlsm,.csv" style="display:none">
+      </label>
+
+      <div class="stat" id="rosterStat"></div>
+      <div class="stat" id="statsStat"></div>
+
+      <div class="grow"></div>
+      <button class="btn btn-xs" id="revert" style="display:none">Revert to bundled</button>
+    </div>
+
+    <!-- nav bar: view context + layout -->
+    <div class="navbar">
+      <div class="tabs"><div class="tab on">Matchup</div></div>
+      <div class="vr"></div>
+      <div class="crumb" id="crumb"></div>
+      <div class="grow"></div>
+      <div class="seg" id="seg">
+        <button data-v="both" class="on">Both</button>
+        <button data-v="a">Team A</button>
+        <button data-v="b">Team B</button>
+      </div>
+    </div>
+
+    <div id="msg"></div>
+
+    <div class="scroll">
+      <div class="board" id="board">
+        <div class="col" id="A"></div>
+        <div class="col" id="B"></div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script src="sheetjs.js"></script>
+<script src="data.js"></script>
+<script src="index_torvik.js"></script>
+<script>
+/* ================= state ================= */
+const BUNDLED = window.CBB_DATA;
+const IDX     = window.CBB_INDEX;
+let D = BUNDLED;                 // active dataset
+let uploadInfo = null;           // {file, saved, when, teams, players}
+
+const pct = (x,d=1) => (x*100).toFixed(d) + '%';
+const n1  = x => x.toFixed(1);
+const esc = s => String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+/* ================= model =================
+   Each player is a rate per 40 minutes.  All five on the floor share the same 40, so
+   per-40 rates are comparable and sum to a lineup total.  Only ratios matter.
+     3PA freq = sum(3PA)/sum(FGA)      Make% = sum(FGM)/sum(FGA)
+   MIN_FLOOR stops a low-minute player's rates exploding when scaled up.            */
+const MIN_FLOOR = 8;
+function per40(p, mOverride){
+  if (p.fga === null || p.fga === undefined) return null;
+  const m = mOverride || p.mpg;   // reconstructed rows have no mpg; they stay per-game
+  const k = (m && m > 0) ? 40/Math.max(m, MIN_FLOOR) : 1;
+  return { fga:p.fga*k, fgm:p.fgm*k, tpa:p.tpa*k, noMin:!m };
+}
+function calc(players, mins){
+  let fga=0, fgm=0, tpa=0, noMin=0, estFga=0;
+  players.forEach(p=>{
+    const r = per40(p, mins[p.id]);
+    if (!r) return;
+    fga+=r.fga; fgm+=r.fgm; tpa+=r.tpa;
+    if (r.noMin) noMin++;
+    if (p.src !== 'torvik') estFga += r.fga;
+  });
+  if (fga <= 0) return null;
+  return { fga, noMin, estShare:estFga/fga, freq3:tpa/fga, make:fgm/fga };
+}
+
+/* ================= header status ================= */
+function daysSince(s){
+  if (!s) return null;
+  const d = new Date(s.replace(' ','T'));
+  if (isNaN(d)) return null;
+  return (Date.now() - d.getTime()) / 86400000;
+}
+function paintStatus(){
+  const rs = document.getElementById('rosterStat');
+  const ss = document.getElementById('statsStat');
+  if (uploadInfo){
+    rs.innerHTML = '<span class="dot d-up"></span>'
+      + '<span class="k">roster</span>'
+      + '<span class="v" title="'+esc(uploadInfo.file)+'">'+esc(trunc(uploadInfo.file,34))+'</span>'
+      + '<span class="k">· uploaded '+esc(uploadInfo.when)+' · '
+      +   uploadInfo.teams+' teams, '+uploadInfo.players+' players</span>';
+  } else {
+    const d = daysSince(BUNDLED.sheetSaved);
+    const stale = d!==null && d>3;
+    rs.innerHTML = '<span class="dot '+(stale?'d-old':'d-ok')+'"></span>'
+      + '<span class="k">roster</span><span class="v">bundled</span>'
+      + '<span class="k">· sheet saved '+esc(BUNDLED.sheetSaved||'?')
+      + (d!==null ? ' ('+fmtAge(d)+')' : '') + '</span>';
+  }
+  const sd = daysSince(IDX && IDX.built);
+  const sstale = sd!==null && sd>7;
+  ss.innerHTML = '<span class="dot '+(sstale?'d-old':'d-ok')+'"></span>'
+    + '<span class="k">stats</span><span class="v">'+esc((IDX&&IDX.year)||'?')+'</span>'
+    + '<span class="k">· built '+esc((IDX&&IDX.built)||'?')
+    + (sd!==null ? ' ('+fmtAge(sd)+')' : '')
+    + (sstale ? ' — run Refresh and Open.cmd' : '') + '</span>';
+  document.getElementById('revert').style.display = uploadInfo ? '' : 'none';
+}
+function fmtAge(d){
+  if (d < 1) return 'today';
+  if (d < 2) return 'yesterday';
+  return Math.round(d)+' days ago';
+}
+function trunc(s,n){ s=String(s); return s.length>n ? s.slice(0,n-1)+'…' : s; }
+const MSG_IC = {ok:'✓', err:'!', busy:'⟳'};
+function say(kind, html){
+  const m = document.getElementById('msg');
+  document.body.classList.toggle('busy', kind==='busy');
+  if (!kind){ m.innerHTML=''; return; }
+  m.innerHTML = '<div class="msg m-'+kind+'"><span class="ic">'+MSG_IC[kind]+'</span>'
+              + '<span>'+html+'</span></div>';
+}
+
+/* ================= roster parsing (browser) ================= */
+const KEYWORDS = ['coach:','team notes','key departures','notes','height','player notes'];
+const isKeyword = s => !!s && KEYWORDS.some(k => String(s).toLowerCase().trim().startsWith(k));
+
+function parseWorkbook(wb){
+  const out = [];   // {conf, team, slot, kind, name, year, ppg, fgpct, tppct, tpag, notes}
+  wb.SheetNames.forEach(sn=>{
+    const rows = XLSX.utils.sheet_to_json(wb.Sheets[sn], {header:1, raw:true, defval:null});
+    let team='', section='';
+    rows.forEach(r=>{
+      const cell = i => (r[i]===null||r[i]===undefined||String(r[i]).trim()==='') ? null : String(r[i]).trim();
+      const A=cell(0), B=cell(1);
+      const filled = r.filter(v=>v!==null&&v!==undefined&&String(v).trim()!=='').length;
+      if (isKeyword(A)){
+        const la = A.toLowerCase();
+        if (la.startsWith('key departures')) section='DEPARTED';
+        else if (la.startsWith('team notes')) section='NOTES';
+        return;
+      }
+      if (A && !B && filled===1){ team=A; section='ROSTER'; return; }
+      if (section!=='ROSTER') return;
+      if (!A || !B) return;
+      if (A.length>6) return;
+      out.push({
+        conf:sn, team, slot:A, kind:/^B\d+$/.test(A)?'BENCH':'STARTER',
+        name:B, year:cell(3),
+        ppg:cell(4), fgpct:cell(9), tppct:cell(10), tpag:cell(11), notes:cell(12)
+      });
+    });
+  });
+  return out;
+}
+
+/* ---- name normalisation + Torvik index lookup ---- */
+function norm(s){
+  if (!s) return '';
+  return String(s).toLowerCase().trim()
+    .normalize('NFD').replace(/[̀-ͯ]/g,'')
+    .replace(/[^a-z0-9 ]/g,' ')
+    .replace(/\s+(jr|sr|ii|iii|iv|v)$/,'')
+    .replace(/\s+/g,' ').trim();
+}
+const F = {};
+(IDX.fields||[]).forEach((f,i)=>F[f]=i);
+const LOOKUP = (()=>{
+  const m = new Map();
+  (IDX.rows||[]).forEach(r=>{
+    const k = norm(r[F.name]);
+    if (!k) return;
+    if (!m.has(k)) m.set(k,[]);
+    m.get(k).push(r);
+  });
+  return m;
+})();
+const num = v => { const x=parseFloat(v); return isFinite(x)?x:0; };
+
+function buildDataset(raw, meta){
+  const byTeam = new Map();
+  const confs = [];
+  const counts = {torvik:0, sheet:0, none:0, rejected:0, ambig:0, newPlayers:0};
+
+  raw.forEach(p=>{
+    if (!byTeam.has(p.team)) byTeam.set(p.team, {name:p.team, conf:p.conf, players:[]});
+    if (!confs.includes(p.conf)) confs.push(p.conf);
+    const T = byTeam.get(p.team);
+
+    const sheetPPG = p.ppg!==null ? num(p.ppg) : null;
+    const priorSchool = (p.notes && /^([A-Za-z][A-Za-z.\s&'-]{1,28}?)\s+transfer/.exec(p.notes))
+                        ? RegExp.$1.trim() : null;
+
+    const cands = LOOKUP.get(norm(p.name)) || [];
+    let pick=null, why='';
+    if (cands.length===1){ pick=cands[0]; why='name'; }
+    else if (cands.length>1){
+      counts.ambig++;
+      // 1) confirm with the sheet's own PPG — the sheet is built from the same season
+      if (sheetPPG!==null){
+        const best = cands.slice().sort((a,b)=>
+          Math.abs(num(a[F.ppg])-sheetPPG) - Math.abs(num(b[F.ppg])-sheetPPG))[0];
+        if (Math.abs(num(best[F.ppg])-sheetPPG) < 0.35){ pick=best; why='name+ppg'; }
+      }
+      // 2) prior school parsed out of the Notes column
+      if (!pick && priorSchool){
+        const ps = priorSchool.replace(/[^A-Za-z]/g,'').toLowerCase();
+        const m = cands.find(r=>String(r[F.team]).replace(/[^A-Za-z]/g,'').toLowerCase().startsWith(ps));
+        if (m){ pick=m; why='name+school'; }
+      }
+      // 3) give up and take the higher-minutes player, flagged
+      if (!pick){
+        pick = cands.slice().sort((a,b)=>num(b[F.mpg])*num(b[F.gp])-num(a[F.mpg])*num(a[F.gp]))[0];
+        why='name+minutes';
+      }
+    }
+
+    let warn=null;
+    // sanity gate: sheet has stats but the matched player scores nothing like them -> wrong person
+    if (pick && sheetPPG!==null){
+      const d = Math.abs(num(pick[F.ppg]) - sheetPPG);
+      if (d > 4.0){ warn='name matched '+pick[F.team]+' but PPG '+n1(num(pick[F.ppg]))
+                        +' vs sheet '+n1(sheetPPG)+' — match rejected';
+                    pick=null; counts.rejected++; }
+      else if (d > 1.5) warn='PPG differs from sheet by '+n1(d);
+    }
+    if (pick && why==='name+minutes')
+      warn = (warn? warn+'; ':'') + 'ambiguous name — could not confirm which player';
+
+    const o = {id:T.players.length, slot:p.slot, name:p.name, year:p.year, kind:p.kind,
+               notes:p.notes, sheetPPG, warn:null};
+
+    if (pick){
+      o.src='torvik'; o.why=why;
+      o.gp=num(pick[F.gp]); o.mpg=num(pick[F.mpg]);
+      o.fga=num(pick[F.fga]); o.fgm=num(pick[F.fgm]);
+      o.tpa=num(pick[F.tpa]); o.tpm=num(pick[F.tpm]);
+      o.tvTeam=pick[F.team];
+      counts.torvik++;
+    } else if (sheetPPG!==null && num(p.fgpct)>0){
+      const fgp=num(p.fgpct)/100, tpp=num(p.tppct)/100, tpa=num(p.tpag);
+      const tpm=tpa*tpp;
+      let fga=(sheetPPG - tpm - 0.20*sheetPPG)/(2*fgp);
+      let floored=false;
+      if (fga < tpa){ fga=tpa; floored=true; }
+      o.src='sheet'; o.why='reconstructed from sheet PPG/FG%/3P%';
+      o.gp=null; o.mpg=null;
+      o.fga=+fga.toFixed(3); o.fgm=+(fga*fgp).toFixed(3);
+      o.tpa=+tpa.toFixed(3); o.tpm=+tpm.toFixed(3);
+      if (floored) warn=(warn?warn+'; ':'')+'FGA floored at 3PA — FT estimate too high for this profile';
+      counts.sheet++;
+    } else {
+      o.src='none'; o.why='no college stats on file';
+      ['gp','mpg','fga','fgm','tpa','tpm'].forEach(f=>o[f]=null);
+      counts.none++;
+    }
+    o.warn = warn;
+    T.players.push(o);
+  });
+
+  const teams = [...byTeam.values()].sort((a,b)=>
+    confs.indexOf(a.conf)-confs.indexOf(b.conf) || a.name.localeCompare(b.name));
+
+  return {
+    generated: meta.when, sheetSaved: meta.saved,
+    statsYear: BUNDLED.statsYear, torvikYear: IDX.year,
+    source: 'Depth chart: '+meta.file+'  |  Stats: barttorvik.com (year='+IDX.year+')',
+    counts, conferences: confs, teams, uploaded:true
+  };
+}
+
+/* ================= upload wiring ================= */
+const drop = document.getElementById('drop');
+const fileInput = document.getElementById('file');
+
+drop.onclick = () => fileInput.click();
+['dragenter','dragover'].forEach(e=>{
+  drop.addEventListener(e, ev=>{ ev.preventDefault(); drop.classList.add('hot'); });
+  document.addEventListener(e, ev=>ev.preventDefault());
+});
+['dragleave','drop'].forEach(e=>drop.addEventListener(e, ()=>drop.classList.remove('hot')));
+drop.addEventListener('drop', ev=>{
+  ev.preventDefault();
+  const f = ev.dataTransfer.files && ev.dataTransfer.files[0];
+  if (f) handleFile(f);
+});
+fileInput.onchange = () => { if (fileInput.files[0]) handleFile(fileInput.files[0]); };
+document.getElementById('revert').onclick = () => {
+  D = BUNDLED; uploadInfo = null;
+  say('ok','Reverted to the bundled roster.');
+  paintStatus(); mount();
+  setTimeout(()=>say(null), 3500);
+};
+
+function handleFile(f){
+  say('busy','Reading <b>'+esc(f.name)+'</b> …');
+  const fr = new FileReader();
+  fr.onerror = () => say('err','Could not read that file.');
+  fr.onload = () => {
+    try{
+      const wb = XLSX.read(new Uint8Array(fr.result), {type:'array'});
+      const raw = parseWorkbook(wb);
+      if (raw.length < 20) throw new Error('only '+raw.length+' player rows found — is this the roster sheet? '
+        + 'Expected position labels in column A (G/F/C, B1-B8) and names in column B.');
+      const saved = f.lastModified ? new Date(f.lastModified).toLocaleString('en-US',
+                      {year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}) : '?';
+      const when  = new Date().toLocaleString('en-US',
+                      {month:'short',day:'numeric',hour:'numeric',minute:'2-digit'});
+      const built = buildDataset(raw, {file:f.name, saved, when});
+      const teamsN = built.teams.length;
+      uploadInfo = {file:f.name, saved, when, teams:teamsN, players:raw.length};
+      D = built;
+
+      const c = built.counts;
+      const bits = ['<b>'+esc(f.name)+'</b> loaded — '+teamsN+' teams, '+raw.length+' players',
+                    c.torvik+' matched to stats',
+                    c.sheet+' reconstructed from the sheet',
+                    c.none+' without stats'];
+      if (c.rejected) bits.push(c.rejected+' bad name match'+(c.rejected>1?'es':'')+' rejected');
+      say('ok', bits.join(' · '));
+      paintStatus(); mount();
+    }catch(err){
+      say('err','<b>Could not use that file.</b> '+esc(err.message||err));
+    }
+  };
+  fr.readAsArrayBuffer(f);
+}
+
+/* ================= presentation helpers ================= */
+/* delta vs the projected five.  Deltas are the trustworthy read (four of five
+   players are unchanged, so their input errors cancel) — so they ride next to
+   every headline number rather than being buried.                            */
+function deltaHTML(v, base){
+  if (base==null) return '<span class="kpi-d">baseline</span>';
+  const d=(v-base)*100;
+  if (Math.abs(d)<0.05) return '<span class="kpi-d">± 0.0 vs projected 5</span>';
+  const up = d>0;
+  return '<span class="kpi-d '+(up?'up':'dn')+'">'
+       + '<span class="ar">'+(up?'▲':'▼')+'</span>'
+       + (up?'+':'')+d.toFixed(1)+' vs projected 5</span>';
+}
+function skelCard(){
+  return '<div class="card"><div class="cbd">'
+    + '<div class="skel" style="width:40%"></div>'
+    + '<div class="skel" style="width:70%;margin-top:10px"></div>'
+    + '<div class="skel" style="width:55%;margin-top:10px"></div></div></div>';
+}
+
+/* ================= panel ================= */
+function Panel(host, initialTeam, label){
+  let team=null, on=new Set(), mins={};
+  host.innerHTML='';
+
+  /* ---- INPUT zone ---------------------------------------------------- */
+  const teamSel = document.createElement('select');
+  teamSel.className='team';
+  D.conferences.forEach(c=>{
+    const g=document.createElement('optgroup'); g.label=c;
+    D.teams.filter(t=>t.conf===c).forEach(t=>{
+      const o=document.createElement('option'); o.value=t.name; o.textContent=t.name; g.appendChild(o);
+    });
+    teamSel.appendChild(g);
+  });
+  const bReset=document.createElement('button');
+  bReset.className='btn'; bReset.textContent='Reset to projected 5';
+
+  const inputCard=document.createElement('div'); inputCard.className='card';
+  const inputHd=document.createElement('div'); inputHd.className='chd';
+  inputHd.innerHTML='<span class="eyebrow">'+esc(label)+'</span>';
+  const inputBd=document.createElement('div'); inputBd.className='cbd';
+  const teamRow=document.createElement('div'); teamRow.className='teamrow';
+  teamRow.append(teamSel,bReset);
+  inputBd.append(teamRow);
+  inputCard.append(inputHd,inputBd);
+
+  /* body holds the analysis + lineup + roster zones */
+  const body=document.createElement('div');
+  body.style.display='flex'; body.style.flexDirection='column'; body.style.gap='var(--s3)';
+  host.append(inputCard, body);
+
+  function load(name){
+    team = D.teams.find(t=>t.name===name) || D.teams[0];
+    teamSel.value = team.name;
+    reset();
+  }
+  function reset(){
+    on=new Set(); mins={};
+    team.players.filter(p=>p.kind==='STARTER'&&p.fga!==null).slice(0,5).forEach(p=>on.add(p.id));
+    if (on.size<5) team.players.filter(p=>p.kind==='BENCH'&&p.fga!==null)
+                     .forEach(p=>{ if(on.size<5) on.add(p.id); });
+    render();
+  }
+  function toggle(id){
+    if (on.has(id)) on.delete(id);
+    else { if (on.size>=5) return; on.add(id); }
+    render();
+  }
+
+  function render(){
+    const sel = team.players.filter(p=>on.has(p.id));
+    const r = calc(sel,mins);
+    const base = calc(team.players.filter(p=>p.kind==='STARTER'),{});
+    body.innerHTML = analysisCard(sel,r,base) + lineupCard(sel,r) + rosterCard(r);
+    wire();
+    paintCrumb();
+  }
+
+  /* ---- ANALYSIS zone ------------------------------------------------- */
+  function analysisCard(sel,r,base){
+    let h='<div class="card"><div class="chd"><span class="eyebrow">Next shot</span>'
+        + '<span class="r"><span class="eyebrow" style="color:var(--dim2)">per 40 min</span></span></div>';
+
+    if (!r){
+      h += '<div class="empty">'
+        +  '<div class="eg">◍</div>'
+        +  '<div class="et">'+(on.size===0?'No players selected':'No usable stats')+'</div>'
+        +  '<div class="es">'+(on.size===0
+             ? 'Pick up to five players from the roster below to price their next shot.'
+             : 'None of the selected players has shooting data on file, so there is nothing to compute.')
+        +  '</div></div></div>';
+      return h;
+    }
+
+    const f3=r.freq3, f2=1-f3, mk=r.make;
+    h += '<div class="cbd">';
+
+    /* primary: the two numbers the tool exists for */
+    h += '<div class="kpis">'
+      +  '<div class="kpi"><div class="kpi-l">'
+      +    '<span class="sw" style="background:var(--m3)"></span>3PA frequency</div>'
+      +    '<div class="kpi-v">'+pct(f3,1)+'</div>'+deltaHTML(f3, base&&base.freq3)+'</div>'
+      +  '<div class="kpi"><div class="kpi-l">'
+      +    '<span class="sw" style="background:var(--mk)"></span>Make rate</div>'
+      +    '<div class="kpi-v">'+pct(mk,1)+'</div>'+deltaHTML(mk, base&&base.make)+'</div>'
+      +  '</div>';
+
+    /* plots: stacked mix bar + make meter */
+    h += '<div class="plot" style="margin-top:var(--s4)">'
+      +  '<div class="plot-l"><span class="eyebrow">Shot mix</span>'
+      +    '<span class="rt">share of attempts</span></div>'
+      +  '<div class="mix">'
+      +    '<span class="seg2" style="width:'+(f2*100).toFixed(1)+'%">'+(f2>0.14?pct(f2,1):'')+'</span>'
+      +    '<span class="seg3" style="width:'+(f3*100).toFixed(1)+'%">'+(f3>0.14?pct(f3,1):'')+'</span>'
+      +  '</div>'
+      +  '<div class="lg">'
+      +    '<span><span class="sw" style="background:var(--m2)"></span>2PA '+pct(f2,1)+'</span>'
+      +    '<span><span class="sw" style="background:var(--m3)"></span>3PA '+pct(f3,1)+'</span>'
+      +  '</div></div>';
+
+    h += '<div class="plot">'
+      +  '<div class="plot-l"><span class="eyebrow">Make rate</span>'
+      +    '<span class="rt">'+pct(mk,1)+' of attempts · '+pct(1-mk,1)+' miss</span></div>'
+      +  '<div class="meter'+(mk>=0.999?' full':'')+'">'
+      +    '<span style="width:'+(mk*100).toFixed(1)+'%"></span></div></div>';
+
+    /* secondary: sanity + provenance, deliberately quieter */
+    const bad = r.fga<40||r.fga>85;
+    h += '<div class="sub">'
+      +  '<span class="it'+(bad?' bad':'')+'">lineup FGA/40 <b>'+n1(r.fga)+'</b>'
+      +    '<span class="pill '+(bad?'p-bad':'p-ok')+'">'+(bad?'check minutes':'in range')+'</span></span>'
+      +  '<span class="it">selected <b>'+on.size+'/5</b></span>';
+    if (r.estShare>0.005) h += '<span class="it">estimated FGA <b>'+pct(r.estShare,0)+'</b></span>';
+    if (r.noMin)          h += '<span class="it">no minutes <b>'+r.noMin+'</b></span>';
+    h += '</div>';
+
+    h += '</div></div>';
+    h += notes(sel,r);
+    return h;
+  }
+
+  /* every accepted limitation stays surfaced — just grouped and ranked now */
+  function notes(sel,r){
+    const noData = sel.filter(p=>p.fga===null);
+    const warns  = sel.filter(p=>p.warn);
+    const out=[];
+    if (on.size!==5)
+      out.push(['w','<b>'+on.size+' of 5 selected</b> — mix and make are computed from '
+        + (on.size===1?'this player':'these '+on.size+' players')+' only.']);
+    if (noData.length)
+      out.push(['w', noData.length+' selected player'+(noData.length>1?'s have':' has')
+        + ' <b>no stats</b> — contributing nothing to these numbers.']);
+    if (r && r.estShare>0.02)
+      out.push(['w','<b>'+pct(r.estShare,0)+'</b> of lineup FGA is estimated from the sheet '
+        + '(±~3pts on frequency).']);
+    if (r && r.noMin)
+      out.push(['w', r.noMin+' player'+(r.noMin>1?'s':'')+' lack minutes — counted per-game.']);
+    warns.forEach(p=>out.push(['e','<b>'+esc(p.name)+'</b> — '+esc(p.warn)]));
+    if (!out.length) return '';
+    return '<div class="notes">'
+      + out.map(([k,t])=>'<div class="note '+k+'"><span class="ic">'
+          +(k==='e'?'!':'⚠')+'</span><span>'+t+'</span></div>').join('')
+      + '</div>';
+  }
+
+  /* ---- LINEUP CONSTRUCTION zone -------------------------------------- */
+  function lineupCard(sel,r){
+    let h='<div class="card"><div class="chd"><span class="eyebrow">On the floor</span>'
+      +  '<span class="r"><span class="eyebrow" style="color:var(--dim2)">'
+      +  on.size+' / 5 · click to remove</span></span></div>'
+      +  '<div class="cbd"><div class="slots">';
+    const ordered = team.players.filter(p=>on.has(p.id));
+    for (let i=0;i<5;i++){
+      const p=ordered[i];
+      if (p){
+        const r40=per40(p,mins[p.id]);
+        const share=(r&&r40)? pct(r40.fga/r.fga,0) : '—';
+        const f3 = p.fga>0 ? pct(p.tpa/p.fga,0) : '—';
+        h += '<div class="slot filled" data-drop="'+p.id+'" title="Remove '+esc(p.name)+'">'
+          +  '<span class="sn">'+esc(p.name)+'</span>'
+          +  '<span class="sm"><span>'+esc(p.slot)+'</span><span>'+share+' FGA</span>'
+          +  '<span>'+f3+' 3PA</span></span></div>';
+      } else {
+        h += '<div class="slot empty"><span class="ph">Empty</span></div>';
+      }
+    }
+    h += '</div></div></div>';
+    return h;
+  }
+
+  /* ---- ROSTER zone --------------------------------------------------- */
+  function rosterCard(r){
+    let h='<div class="card"><div class="chd"><span class="eyebrow">Roster</span>'
+      + '<span class="r"><span class="eyebrow" style="color:var(--dim2)">'
+      + 'click a row to toggle · edit Min to reproject</span></span></div>'
+      + '<div class="cbd cbd-flush"><table><thead><tr>'
+      + '<th class="l">Player</th><th>Yr</th>'
+      + '<th class="gs">Min</th>'
+      + '<th class="gs">3PA%</th><th>FG%</th><th>3P%</th>'
+      + '<th class="gs">Share</th></tr></thead><tbody>';
+    let last=null;
+    team.players.forEach(p=>{
+      if (p.kind!==last){
+        h+='<tr class="grp"><th colspan="7">'
+          + (p.kind==='STARTER'?'Projected starters':'Bench')+'</th></tr>';
+        last=p.kind;
+      }
+      h += row(p,r);
+    });
+    h += '</tbody></table></div></div>';
+    return h;
+  }
+
+  function row(p,r){
+    const sel=on.has(p.id);
+    const r40=per40(p,mins[p.id]);
+    const share=(sel&&r&&r40)? r40.fga/r.fga : null;
+    let badge='';
+    if (p.src==='sheet') badge='<span class="badge b-est" title="'+esc(p.why)+'">EST</span>';
+    if (p.src==='none')  badge='<span class="badge b-no" title="no college stats on file">NO DATA</span>';
+    if (p.warn)          badge+=' <span class="badge b-wn" title="'+esc(p.warn)+'">!</span>';
+    const cl=['pick',sel?'sel':'',p.fga===null?'nostat':''].filter(Boolean).join(' ');
+    return '<tr class="'+cl+'" data-id="'+p.id+'">'
+      + '<td class="l pl"><div class="pn"><span class="box"></span>'
+      +   '<span class="pos">'+esc(p.slot)+'</span>'
+      +   '<span class="pnm">'+esc(p.name)+'</span>'+badge+'</div></td>'
+      + '<td style="color:var(--dim2);font-size:var(--f1)">'+esc(p.year||'')+'</td>'
+      + '<td class="gs"><input class="mm" type="number" min="1" max="40" step="1" data-id="'+p.id+'" '
+      +   'value="'+(mins[p.id]!==undefined?mins[p.id]:(p.mpg!=null?p.mpg:''))+'" '
+      +   'placeholder="'+(p.fga===null?'—':'?')+'"></td>'
+      + '<td class="gs">'+(p.fga>0?pct(p.tpa/p.fga,0):'—')+'</td>'
+      + '<td>'+(p.fga>0?pct(p.fgm/p.fga,1):'—')+'</td>'
+      + '<td>'+(p.tpa>0?pct(p.tpm/p.tpa,1):'—')+'</td>'
+      + '<td class="gs">'+(share!==null?pct(share,0):'—')+'</td></tr>';
+  }
+
+  function wire(){
+    body.querySelectorAll('tr.pick').forEach(tr=>{
+      tr.onclick = e => { if (e.target.tagName!=='INPUT') toggle(+tr.dataset.id); };
+    });
+    body.querySelectorAll('input.mm').forEach(inp=>{
+      inp.onchange = () => {
+        const v=parseFloat(inp.value);
+        if (v>0) mins[+inp.dataset.id]=v; else delete mins[+inp.dataset.id];
+        render();
+      };
+    });
+    body.querySelectorAll('.slot.filled').forEach(el=>{
+      el.onclick = () => toggle(+el.dataset.drop);
+    });
+  }
+
+  teamSel.onchange = () => load(teamSel.value);
+  bReset.onclick = reset;
+  load(initialTeam);
+
+  return { name: () => team && team.name };
+}
+
+/* ================= mount ================= */
+let panelA=null, panelB=null;
+function paintCrumb(){
+  const c=document.getElementById('crumb');
+  if (!c || !panelA || !panelB) return;
+  c.innerHTML = '<b>'+esc(panelA.name()||'')+'</b>'
+              + '<span class="vs">vs</span>'
+              + '<b>'+esc(panelB.name()||'')+'</b>';
+}
+function mount(){
+  const a=D.teams[0] && D.teams[0].name;
+  const b=D.teams[1] ? D.teams[1].name : a;
+  panelA = Panel(document.getElementById('A'), a, 'Team A');
+  panelB = Panel(document.getElementById('B'), b, 'Team B');
+  paintCrumb();
+}
+
+/* layout switcher — presentation only */
+document.getElementById('seg').addEventListener('click', ev=>{
+  const b=ev.target.closest('button'); if(!b) return;
+  document.querySelectorAll('#seg button').forEach(x=>x.classList.toggle('on',x===b));
+  const board=document.getElementById('board');
+  board.classList.remove('only-a','only-b');
+  if (b.dataset.v==='a') board.classList.add('only-a');
+  if (b.dataset.v==='b') board.classList.add('only-b');
+});
+
+paintStatus();
+mount();
+</script>
+</body>
+</html>
