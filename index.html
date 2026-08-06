@@ -26,7 +26,11 @@
   --m3:#3987e5;          /* 3PA  — categorical slot 1 */
   --m2:#d95926;          /* 2PA  — categorical slot 2 */
   --mk:#199e70;          /* make — meter fill        */
-  --mk-track:#1d6b4e;    /* make — meter track, same hue ramp */
+  --mk-track:#134d38;    /* miss — darker step of the SAME hue, not a grey.
+                            Make/Miss is one ratio against a whole, so this
+                            stays a ramp; a categorical grey here failed the
+                            chroma and contrast gates. Darkened from #1d6b4e
+                            so the two steps separate at a glance.          */
 
   /* --- status (reserved; never used as a series colour) --- */
   --good:#0ca30c; --warn:#fab219; --serious:#ec835a; --crit:#d03b3b;
@@ -50,7 +54,6 @@ body{margin:0;background:var(--bg);color:var(--tx);
 
 /* columns of numbers align; standalone display numbers use proportional figures */
 table,.mono{font-variant-numeric:tabular-nums}
-.kpi-v{font-variant-numeric:proportional-nums}
 
 .eyebrow{font-size:var(--f0);letter-spacing:.08em;text-transform:uppercase;
          font-weight:700;color:var(--dim)}
@@ -199,43 +202,56 @@ select:focus,input:focus{outline:none;border-color:var(--acc);background:var(--r
 select.team{flex:1;min-width:0;font-size:var(--f4);font-weight:700;letter-spacing:-.01em}
 
 /* ============================================================================
-   ANALYSIS — primary KPIs, then the two plots, then secondary footer
+   ANALYSIS — the bars ARE the display.  No KPI tiles: a percentage printed
+   inside the segment it describes needs no separate tile repeating it.
    ========================================================================= */
-.kpis{display:grid;grid-template-columns:1fr 1fr;gap:var(--s3)}
-.kpi{display:flex;flex-direction:column;gap:3px;min-width:0}
-.kpi+.kpi{padding-left:var(--s3);border-left:1px solid var(--line)}
-.kpi-l{display:flex;align-items:center;gap:6px;font-size:var(--f0);
-       letter-spacing:.07em;text-transform:uppercase;font-weight:700;color:var(--dim)}
-.kpi-v{font-size:var(--f5);font-weight:650;letter-spacing:-.02em;line-height:1.05;color:var(--tx)}
 .kpi-d{font-size:var(--f1);color:var(--dim2);display:flex;align-items:center;gap:4px}
 .kpi-d.up{color:#63c98f} .kpi-d.dn{color:#e39191}
 .kpi-d .ar{font-size:9px}
 
 /* plots ------------------------------------------------------------------- */
-.plot+.plot{margin-top:var(--s3)}
-.plot-l{display:flex;align-items:baseline;gap:var(--s2);margin-bottom:5px}
-.plot-l .eyebrow{white-space:nowrap}
+/* generous separation: with the tiles gone these two bars carry the card, and
+   the gap is what keeps them reading as two questions instead of one stack. */
+.plot+.plot{margin-top:var(--s5)}
+.plot-l{display:flex;align-items:baseline;gap:var(--s2);margin-bottom:6px}
+.plot-l .eyebrow{white-space:nowrap;color:var(--tx2)}
 .plot-l .rt{margin-left:auto;font-size:var(--f1);color:var(--dim2)}
 
-/* stacked bar: 2px surface gap does the separating, 4px rounded outer ends */
-.mix{display:flex;height:22px;gap:2px;background:var(--card)}
-.mix>span{display:flex;align-items:center;justify-content:center;
-          font-size:var(--f1);font-weight:700;overflow:hidden;white-space:nowrap;
-          transition:width .18s ease-out}
-.mix>span:first-child{border-radius:var(--r1) 0 0 var(--r1)}
-.mix>span:last-child{border-radius:0 var(--r1) var(--r1) 0}
+/* primary bar — shot distribution.  Tall enough to hold its own figures, so
+   the percentage sits in the segment rather than in a legend below it. */
+.mix{display:flex;height:38px;gap:2px;background:var(--card)}
+.mix>span{display:flex;align-items:center;justify-content:center;gap:5px;
+          overflow:hidden;white-space:nowrap;transition:width .18s ease-out}
+.mix>span:first-child{border-radius:var(--r2) 0 0 var(--r2)}
+.mix>span:last-child{border-radius:0 var(--r2) var(--r2) 0}
 .seg2{background:var(--m2);color:#1b0d05}
 .seg3{background:var(--m3);color:#06121f}
+/* figure and its unit label share the segment; the label drops out first when
+   a lineup is lopsided and the segment gets narrow. */
+.mix .bv{font-size:var(--f4);font-weight:700;letter-spacing:-.02em;
+         font-variant-numeric:proportional-nums}
+.mix .bk{font-size:9px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;
+         opacity:.72}
 
-/* meter: one ratio against a whole — fill + lighter/darker step of same ramp */
-.meter{height:12px;border-radius:var(--r1);background:var(--mk-track);overflow:hidden}
-.meter>span{display:block;height:100%;background:var(--mk);
-            border-radius:var(--r1) 0 0 var(--r1);transition:width .18s ease-out}
-.meter.full>span{border-radius:var(--r1)}
+/* secondary bar — expected FG%.  Still a meter (one ratio against a whole, so
+   Make and Miss are not independent categories), but the track is now a
+   visibly separate step of the same hue and BOTH figures are printed.
+   The old grey Miss failed contrast + chroma gates; do not restore it.      */
+.meter{display:flex;height:30px;border-radius:var(--r2);background:var(--mk-track);
+       overflow:hidden}
+.meter>span{display:flex;align-items:center;gap:5px;justify-content:center;
+            overflow:hidden;white-space:nowrap;transition:width .18s ease-out}
+.meter .fill{background:var(--mk);color:#02120b}
+.meter .rest{color:#9fd8bf}          /* sits on --mk-track, not on the card */
+.meter .bv{font-size:var(--f3);font-weight:700;font-variant-numeric:proportional-nums}
+.meter .bk{font-size:9px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;
+           opacity:.75}
 
 .lg{display:flex;flex-wrap:wrap;gap:var(--s3);margin-top:6px;
     font-size:var(--f1);color:var(--tx2)}
 .lg span{display:flex;align-items:center;gap:5px}
+/* deltas move under the bar they belong to — still the trustworthy read */
+.plot-d{display:flex;gap:var(--s3);margin-top:5px;font-size:var(--f1)}
 
 /* secondary metric strip — deliberately quieter than the KPIs above it */
 .sub{display:flex;flex-wrap:wrap;align-items:center;gap:var(--s3);
@@ -252,17 +268,30 @@ select.team{flex:1;min-width:0;font-size:var(--f4);font-weight:700;letter-spacin
 /* ============================================================================
    LINEUP CONSTRUCTION — five explicit slots
    ========================================================================= */
-.slots{display:grid;grid-template-columns:repeat(5,1fr);gap:var(--s1)}
-.slot{background:var(--inset);border:1px solid var(--line);border-radius:var(--r1);
-      padding:6px;min-width:0;display:flex;flex-direction:column;gap:2px;
-      min-height:46px;justify-content:center}
-.slot.filled{background:var(--raise);border-color:var(--line2);cursor:pointer}
-.slot.filled:hover{border-color:var(--crit)}
+/* Chips, not buttons: no fill of their own, a position rail on the left edge,
+   and the two rates set as a labelled pair under the name.                   */
+.slots{display:grid;grid-template-columns:repeat(5,1fr);gap:var(--s2)}
+.slot{background:transparent;border:1px solid var(--line);border-radius:var(--r2);
+      padding:var(--s2) var(--s2) var(--s2) 10px;min-width:0;
+      display:flex;flex-direction:column;gap:5px;min-height:56px;justify-content:center;
+      position:relative;overflow:hidden;transition:border-color .12s,background .12s}
+.slot.filled{background:var(--inset);border-color:var(--line2);cursor:pointer}
+/* position rail — the chip's only decoration, and it encodes something */
+.slot.filled::before{content:'';position:absolute;left:0;top:0;bottom:0;width:2px;
+                     background:var(--line3)}
+.slot.filled:hover{background:var(--raise);border-color:#5e3232}
+.slot.filled:hover::before{background:var(--crit)}
 .slot.filled:hover .sn{color:#e39191}
-.slot.empty{border-style:dashed;align-items:center;justify-content:center}
-.slot .sn{font-size:var(--f1);font-weight:650;color:var(--tx);white-space:nowrap;
-          overflow:hidden;text-overflow:ellipsis;line-height:1.25}
-.slot .sm{font-size:9px;color:var(--dim2);display:flex;gap:5px;white-space:nowrap}
+.slot.empty{border-style:dashed;border-color:var(--line);
+            align-items:center;justify-content:center}
+.slot .sn{font-size:var(--f2);font-weight:650;color:var(--tx);white-space:nowrap;
+          overflow:hidden;text-overflow:ellipsis;line-height:1.2;letter-spacing:-.01em}
+/* name row carries the position label inline so it stops taking a stat slot */
+.slot .snr{display:flex;align-items:baseline;gap:6px;min-width:0}
+.slot .sp{font-size:9px;font-weight:700;color:var(--dim2);letter-spacing:.06em;flex:none}
+.slot .sm{display:flex;gap:var(--s2);white-space:nowrap;font-size:9px;color:var(--dim2)}
+.slot .sm b{color:var(--tx2);font-size:var(--f1);font-weight:650;
+            font-variant-numeric:tabular-nums}
 .slot .ph{font-size:var(--f0);color:var(--dim2);letter-spacing:.05em;text-transform:uppercase}
 
 /* ============================================================================
@@ -342,7 +371,7 @@ body.busy .board{opacity:.45;pointer-events:none;transition:opacity .15s}
 @media(max-width:1180px){
   :root{--sb:172px}
   .col{padding:var(--s3) var(--s3) var(--s6)}
-  .kpi-v{font-size:19px}
+  .mix{height:34px} .mix .bv{font-size:var(--f3)}
 }
 /* stack the two teams; keep the sidebar */
 @media(max-width:960px){
@@ -363,9 +392,8 @@ body.busy .board{opacity:.45;pointer-events:none;transition:opacity .15s}
   .sidebar{display:none}
   .top,.navbar{padding:0 var(--s3)}
   .drop i{display:none}
-  .kpis{grid-template-columns:1fr}
-  .kpi+.kpi{padding-left:0;border-left:0;padding-top:var(--s3);
-            border-top:1px solid var(--line)}
+  /* narrow: segment labels go first, figures stay */
+  .mix .bk,.meter .bk{display:none}
   .slots{grid-template-columns:repeat(2,1fr)}
   .crumb{display:none}
 }
@@ -391,18 +419,18 @@ body.busy .board{opacity:.45;pointer-events:none;transition:opacity .15s}
       </div>
 
       <div class="sgrp">
-        <div class="eyebrow">Shot mix</div>
+        <div class="eyebrow">Shot distribution</div>
         <div class="legend">
-          <div class="lrow"><span class="sw" style="background:var(--m2)"></span>2PA share</div>
-          <div class="lrow"><span class="sw" style="background:var(--m3)"></span>3PA share</div>
+          <div class="lrow"><span class="sw" style="background:var(--m2)"></span>2PT attempts</div>
+          <div class="lrow"><span class="sw" style="background:var(--m3)"></span>3PT attempts</div>
         </div>
       </div>
 
       <div class="sgrp">
-        <div class="eyebrow">Make rate</div>
+        <div class="eyebrow">Expected FG%</div>
         <div class="legend">
           <div class="lrow"><span class="sw" style="background:var(--mk)"></span>Made</div>
-          <div class="lrow"><span class="sw sw-tr"></span>Attempted</div>
+          <div class="lrow"><span class="sw" style="background:var(--mk-track)"></span>Missed</div>
         </div>
       </div>
 
@@ -765,14 +793,15 @@ function handleFile(f){
 /* delta vs the projected five.  Deltas are the trustworthy read (four of five
    players are unchanged, so their input errors cancel) — so they ride next to
    every headline number rather than being buried.                            */
-function deltaHTML(v, base){
-  if (base==null) return '<span class="kpi-d">baseline</span>';
+function deltaHTML(v, base, what){
+  const w = what ? esc(what)+' ' : '';
+  if (base==null) return '<span class="kpi-d">'+w+'baseline · projected 5</span>';
   const d=(v-base)*100;
-  if (Math.abs(d)<0.05) return '<span class="kpi-d">± 0.0 vs projected 5</span>';
+  if (Math.abs(d)<0.05) return '<span class="kpi-d">'+w+'± 0.0 vs projected 5</span>';
   const up = d>0;
   return '<span class="kpi-d '+(up?'up':'dn')+'">'
        + '<span class="ar">'+(up?'▲':'▼')+'</span>'
-       + (up?'+':'')+d.toFixed(1)+' vs projected 5</span>';
+       + w+(up?'+':'')+d.toFixed(1)+' vs projected 5</span>';
 }
 function skelCard(){
   return '<div class="card"><div class="cbd">'
@@ -842,7 +871,8 @@ function Panel(host, initialTeam, label){
 
   /* ---- ANALYSIS zone ------------------------------------------------- */
   function analysisCard(sel,r,base){
-    let h='<div class="card"><div class="chd"><span class="eyebrow">Next shot</span>'
+    let h='<div class="card"><div class="chd">'
+        + '<span class="eyebrow">Current offensive profile</span>'
         + '<span class="r"><span class="eyebrow" style="color:var(--dim2)">per 40 min</span></span></div>';
 
     if (!r){
@@ -850,52 +880,54 @@ function Panel(host, initialTeam, label){
         +  '<div class="eg">◍</div>'
         +  '<div class="et">'+(on.size===0?'No players selected':'No usable stats')+'</div>'
         +  '<div class="es">'+(on.size===0
-             ? 'Pick up to five players from the roster below to price their next shot.'
+             ? 'Pick up to five players from the roster below to see their combined shot profile.'
              : 'None of the selected players has shooting data on file, so there is nothing to compute.')
         +  '</div></div></div>';
       return h;
     }
 
-    const f3=r.freq3, f2=1-f3, mk=r.make;
+    const f3=r.freq3, f2=1-f3, mk=r.make, ms=1-mk;
     h += '<div class="cbd">';
 
-    /* primary: the two numbers the tool exists for */
-    h += '<div class="kpis">'
-      +  '<div class="kpi"><div class="kpi-l">'
-      +    '<span class="sw" style="background:var(--m3)"></span>3PA frequency</div>'
-      +    '<div class="kpi-v">'+pct(f3,1)+'</div>'+deltaHTML(f3, base&&base.freq3)+'</div>'
-      +  '<div class="kpi"><div class="kpi-l">'
-      +    '<span class="sw" style="background:var(--mk)"></span>Make rate</div>'
-      +    '<div class="kpi-v">'+pct(mk,1)+'</div>'+deltaHTML(mk, base&&base.make)+'</div>'
-      +  '</div>';
-
-    /* plots: stacked mix bar + make meter */
-    h += '<div class="plot" style="margin-top:var(--s4)">'
-      +  '<div class="plot-l"><span class="eyebrow">Shot mix</span>'
-      +    '<span class="rt">share of attempts</span></div>'
-      +  '<div class="mix">'
-      +    '<span class="seg2" style="width:'+(f2*100).toFixed(1)+'%">'+(f2>0.14?pct(f2,1):'')+'</span>'
-      +    '<span class="seg3" style="width:'+(f3*100).toFixed(1)+'%">'+(f3>0.14?pct(f3,1):'')+'</span>'
-      +  '</div>'
-      +  '<div class="lg">'
-      +    '<span><span class="sw" style="background:var(--m2)"></span>2PA '+pct(f2,1)+'</span>'
-      +    '<span><span class="sw" style="background:var(--m3)"></span>3PA '+pct(f3,1)+'</span>'
-      +  '</div></div>';
+    /* The bars are the display.  Each figure is printed inside the segment it
+       describes, so nothing above needs to restate it — the segment width and
+       the number are one mark.  Labels drop out on narrow segments, figures
+       drop out below ~9% where they would not fit at all.                    */
+    const seg = (cls,v,key,w) =>
+        '<span class="'+cls+'" style="width:'+(v*100).toFixed(1)+'%">'
+      + (v>0.09 ? '<span class="bv">'+pct(v,1)+'</span>' : '')
+      + (v>0.20 ? '<span class="bk">'+key+'</span>'      : '')
+      + '</span>';
 
     h += '<div class="plot">'
-      +  '<div class="plot-l"><span class="eyebrow">Make rate</span>'
-      +    '<span class="rt">'+pct(mk,1)+' of attempts · '+pct(1-mk,1)+' miss</span></div>'
-      +  '<div class="meter'+(mk>=0.999?' full':'')+'">'
-      +    '<span style="width:'+(mk*100).toFixed(1)+'%"></span></div></div>';
+      +  '<div class="plot-l"><span class="eyebrow">Shot distribution</span>'
+      +    '<span class="rt">share of attempts</span></div>'
+      +  '<div class="mix">'
+      +    seg('seg2', f2, '2PT')
+      +    seg('seg3', f3, '3PT')
+      +  '</div>'
+      +  '<div class="plot-d">'+deltaHTML(f3, base&&base.freq3, '3PT rate')+'</div>'
+      +  '</div>';
 
-    /* secondary: sanity + provenance, deliberately quieter */
+    h += '<div class="plot">'
+      +  '<div class="plot-l"><span class="eyebrow">Expected FG%</span>'
+      +    '<span class="rt">of all attempts</span></div>'
+      +  '<div class="meter">'
+      +    seg('fill', mk, 'Made')
+      +    seg('rest', ms, 'Miss')
+      +  '</div>'
+      +  '<div class="plot-d">'+deltaHTML(mk, base&&base.make, 'FG%')+'</div>'
+      +  '</div>';
+
+    /* secondary: sanity + provenance.  Compact single strip — the "in range"
+       pill only earns its ink when something is actually off.                 */
     const bad = r.fga<40||r.fga>85;
     h += '<div class="sub">'
-      +  '<span class="it'+(bad?' bad':'')+'">lineup FGA/40 <b>'+n1(r.fga)+'</b>'
-      +    '<span class="pill '+(bad?'p-bad':'p-ok')+'">'+(bad?'check minutes':'in range')+'</span></span>'
-      +  '<span class="it">selected <b>'+on.size+'/5</b></span>';
-    if (r.estShare>0.005) h += '<span class="it">estimated FGA <b>'+pct(r.estShare,0)+'</b></span>';
-    if (r.noMin)          h += '<span class="it">no minutes <b>'+r.noMin+'</b></span>';
+      +  '<span class="it">'+on.size+'/5 selected</span>'
+      +  '<span class="it'+(bad?' bad':'')+'">'+n1(r.fga)+' FGA/40'
+      +    (bad?'<span class="pill p-bad">check minutes</span>':'')+'</span>';
+    if (r.estShare>0.005) h += '<span class="it">'+pct(r.estShare,0)+' est.</span>';
+    if (r.noMin)          h += '<span class="it">'+r.noMin+' no min</span>';
     h += '</div>';
 
     h += '</div></div>';
@@ -941,9 +973,10 @@ function Panel(host, initialTeam, label){
         const share=(r&&r40)? pct(r40.fga/r.fga,0) : '—';
         const f3 = p.fga>0 ? pct(p.tpa/p.fga,0) : '—';
         h += '<div class="slot filled" data-drop="'+p.id+'" title="Remove '+esc(p.name)+'">'
-          +  '<span class="sn">'+esc(p.name)+'</span>'
-          +  '<span class="sm"><span>'+esc(p.slot)+'</span><span>'+share+' FGA</span>'
-          +  '<span>'+f3+' 3PA</span></span></div>';
+          +  '<span class="snr"><span class="sp">'+esc(p.slot)+'</span>'
+          +    '<span class="sn">'+esc(p.name)+'</span></span>'
+          +  '<span class="sm"><span><b>'+share+'</b> FGA</span>'
+          +    '<span><b>'+f3+'</b> 3PT</span></span></div>';
       } else {
         h += '<div class="slot empty"><span class="ph">Empty</span></div>';
       }
