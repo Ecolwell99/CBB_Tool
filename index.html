@@ -277,6 +277,11 @@ select.team{flex:1;min-width:0;font-size:var(--f4);font-weight:700;letter-spacin
 .atitle{font-size:var(--f0);color:var(--dim);margin-bottom:var(--s2);
         letter-spacing:.03em}
 table.atab{width:100%;font-size:var(--f0);font-variant-numeric:tabular-nums}
+/* 14 columns do not fit a half-width team column once the raw->adj pairs are in.
+   Tighten the padding and let the widest cells wrap rather than clip the outcome
+   contributions off the right edge — those are the point of the table.        */
+table.atab th,table.atab td{padding:3px 4px}
+table.atab .rt{white-space:normal;min-width:52px}
 table.atab th{font-size:9px;letter-spacing:.04em;text-transform:uppercase;
               color:var(--dim2);text-align:right;padding:3px 5px;font-weight:700;
               border-bottom:1px solid var(--line);white-space:nowrap}
@@ -287,6 +292,16 @@ table.atab td.b{color:var(--tx);font-weight:700}
 table.atab td.gs,table.atab th.gs{border-left:1px solid var(--line)}
 .asum{margin-top:var(--s2);padding-top:var(--s2)}
 .anote{margin-top:6px;font-size:9px;color:var(--dim2);font-style:italic}
+/* raw value struck through in favour of the adjusted one, then the sample size.
+   Three weights in one cell, so the pull is readable without a second column. */
+/* raw sits UNDER the adjusted value, struck through, with the sample size beside
+   it.  Stacking keeps the column as narrow as one number, so all 14 columns fit. */
+.aq{color:var(--dim2);font-size:9px;text-decoration:line-through;
+    text-decoration-thickness:1px;margin-top:1px}
+.an{color:var(--dim2);font-size:8px;margin-left:3px;opacity:.8;
+    display:inline-block;text-decoration:none}
+.an::before{content:'n'}
+.ashow{float:right;color:var(--dim2);font-size:9px;font-style:italic}
 
 .lg{display:flex;flex-wrap:wrap;gap:var(--s3);margin-top:6px;
     font-size:var(--f1);color:var(--tx2)}
@@ -575,13 +590,75 @@ const esc = s => String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&l
        NOT move a next-shot price.  They are carried for roster/rotation work and
        are shown in the audit as ignored.
 
-   SMALL SAMPLES: a hard MIN_FLOOR used to clamp the denominator, which silently
-   decided that a 35-minute player barely shoots (Furphy: 4.3% of next shots).
-   Replaced with empirical-Bayes shrinkage toward the league mean, weighted by how
-   much evidence exists.  A well-sampled player is untouched; a thin one is pulled
-   to average instead of to an arbitrary floor.                                  */
-const SHRINK_K   = 200;    /* minutes at which a player's own rate gets 50% weight */
-const PRIOR_FGA40 = 11.75; /* league mean FGA/40, measured over 874 rated players  */
+   SMALL SAMPLES — four separate shrinkages, every constant MEASURED from
+   index_torvik.js (4,812 rated players), not chosen.  Method of moments: split the
+   observed spread of a rate into true player-to-player spread plus sampling noise;
+   the ratio gives the prior weight K directly.
+
+     rate            prior        K            what K means
+     volume FGA/40   role table   200 min      see VOL_* below
+     3PA share       39.5%        3.4 FGA      mix is a real personal trait
+     3P%             34.1%        200 3PA      accuracy is mostly noise
+     2P%             51.9%         57 2PA
+
+   The measured K's confirm the design principle this tool was built on: MIX FROM
+   THE LINEUP, ACCURACY FROM THE PLAYER.  A player's 3PA share is his own after ~4
+   attempts (K=3.4); his 3P% still needs hundreds (K=200).  That is why a 2-for-6
+   night must not be read as a cold shooter, and it is now enforced in the maths
+   rather than only warned about in a note.
+
+   THE VOLUME PRIOR IS ROLE-AWARE, and this is the fix that matters.  A flat league
+   mean (the old PRIOR_FGA40 = 11.75) is a STARTER's shot volume, so shrinking a
+   deep-bench player toward it pulled him UP and handed him a starter's share of the
+   next shot.  Pooled FGA/40 rises smoothly with historical minutes:
+
+       mpg  2.5-5 -> 8.66     mpg 15-17.5 -> 9.91     mpg 27.5-30 -> 12.60
+       mpg  5-7.5 -> 8.62     mpg 20-22.5 -> 10.88    mpg 30-32.5 -> 13.12
+       mpg 10-12.5 -> 9.15    mpg 25-27.5 -> 11.86    mpg 35-37.5 -> 14.48
+
+   so a thin player is shrunk toward what players in HIS role shoot.  The line below
+   is a minute-weighted least-squares fit over mpg>=6 & totMin>=100.  It is clamped:
+   the low clamp is empirical (bench volume plateaus near 8.6, it does not fall to
+   zero), and it also blocks the 1-minute-1-shot artifact that makes raw per-40 rates
+   explode on tiny samples.
+
+   VOL_K stays at 200 min even though the measured residual is ~61.  That 61 was
+   fitted on players with >=100 minutes and does not extrapolate down to a 35-minute
+   sample, where per-minute noise is far larger; 200 also errs toward quiet, which is
+   the stated preference.  It barely matters now — once the prior is role-aware, raw
+   and prior are close for thin players, so Furphy lands at 13.1% with K=60 and 13.3%
+   with K=200.  The role prior did the work, not the shrinkage strength.           */
+const VOL_K = 200;                        /* minutes for 50% weight on own rate    */
+const VOL_A = 6.502, VOL_B = 0.2117;      /* FGA/40 = A + B*mpg  (measured fit)     */
+const VOL_LO = 8.5,  VOL_HI = 14.5;       /* clamp to the observed pooled range     */
+const VOL_NOMIN = 11.7;                   /* pooled league FGA/40, for no-minute rows */
+const MIX_K = 3.4,  MIX_P = 0.395;        /* 3PA share of FGA                       */
+const Q3_K  = 200,  Q3_P  = 0.341;        /* 3P%                                    */
+const Q2_K  = 57,   Q2_P  = 0.519;        /* 2P%                                    */
+
+/* what players in this role shoot, per 40 — the shrinkage target for volume */
+function volPrior(mpg){
+  if (!(mpg > 0)) return VOL_NOMIN;
+  return Math.min(VOL_HI, Math.max(VOL_LO, VOL_A + VOL_B * mpg));
+}
+
+/* ---- data plausibility gate -------------------------------------------------
+   Found during the league sweep: 5 of the 51 sheet-reconstructed rows are corrupt,
+   because that parser is positional and never reads a header (Thomas Allard comes
+   through at 4,460 FGA/game; Will Cooper at 37.7 FGA of which 37.7 are threes and
+   0.151 are makes).  Shrinkage does NOT save these — the clamp caps their volume,
+   but the ratios survive and Allard priced out at a 0.7% 2P%, which would wreck any
+   lineup he was clicked into.  Bad data is a different failure from thin data, so
+   it gets its own gate: an impossible row keeps its identity in the UI but prices
+   entirely off league priors, and is badged BAD so it is never silent.
+   All five are bench rows, so no projected starter is affected today.          */
+const MAX_FGA_PG = 25;              /* no D1 player averages 25 attempts a game */
+function dataBad(p){
+  if (p.fga == null) return false;
+  return p.fga > MAX_FGA_PG || p.fgm > p.fga + 1e-6
+      || p.tpa > p.fga + 1e-6 || p.tpm > p.tpa + 1e-6
+      || p.fga < 0 || p.fgm < 0 || p.tpa < 0 || p.tpm < 0;
+}
 
 /* per-game -> per-40 on-court attempt rate, using HISTORICAL minutes only */
 function rawRate40(p){
@@ -590,14 +667,18 @@ function rawRate40(p){
   return { r40: p.fga * 40 / p.mpg, totMin: p.mpg * (p.gp || 0), noMin:false };
 }
 
-/* shrink that rate toward the league prior by how many minutes back it */
+/* shrink that rate toward the ROLE prior by how many minutes back it */
 function adjRate40(p){
   const raw = rawRate40(p);
   if (!raw) return null;
+  if (dataBad(p))                      /* impossible row -> price off the prior alone */
+    return { raw:null, adj:VOL_NOMIN, prior:VOL_NOMIN, totMin:0, conf:0,
+             noMin:!(p.mpg>0), bad:true };
   if (raw.noMin)                       /* EST rows: no minutes at all -> all prior */
-    return { raw:null, adj:PRIOR_FGA40, totMin:0, conf:0, noMin:true };
-  const conf = raw.totMin / (raw.totMin + SHRINK_K);
-  return { raw:raw.r40, adj: conf*raw.r40 + (1-conf)*PRIOR_FGA40,
+    return { raw:null, adj:VOL_NOMIN, prior:VOL_NOMIN, totMin:0, conf:0, noMin:true };
+  const prior = volPrior(p.mpg);
+  const conf  = raw.totMin / (raw.totMin + VOL_K);
+  return { raw:raw.r40, prior, adj: conf*raw.r40 + (1-conf)*prior,
            totMin:raw.totMin, conf, noMin:false };
 }
 
@@ -608,15 +689,37 @@ function probOf(r, id){
   return row ? row.prob : null;
 }
 
-/* per-player conversion split.  Undefined branches (no 3PA taken, or every shot a
-   three) return null and are excluded from that branch rather than counted as 0%. */
+/* per-player mix and conversion, each shrunk on its OWN measured sample size.
+   Season totals are the evidence (per-game rate x games), so a 14-game reserve is
+   judged on the ~2 threes he actually took, not on a season's worth of confidence.
+
+   Every branch now returns a number, so there are no null branches to exclude: a
+   player with zero 3PA gets the league 3P% for the 3s he is not taking anyway (his
+   r3 shrinks to near zero, so it barely enters), and a 0-for-2 shooter is no longer
+   priced at 0.0%.  This is what stops thin samples producing extreme outcomes.  */
+function shrinkRate(made, att, K, prior){
+  const a = Math.max(att, 0), m = Math.min(Math.max(made, 0), a);
+  return { v: (m + K*prior) / (a + K), att:a, raw: a > 0.0001 ? m/a : null,
+           conf: a / (a + K) };
+}
 function splitRates(p){
-  const a2 = p.fga - p.tpa, m2 = p.fgm - p.tpm;
+  if (dataBad(p)) {                    /* ratios are untrustworthy too -> all prior */
+    const z = a => ({ v:a, att:0, raw:null, conf:0 });
+    return { r3:MIX_P, q3:Q3_P, q2:Q2_P,
+             mixI:z(MIX_P), q3I:z(Q3_P), q2I:z(Q2_P), neg:false, bad:true };
+  }
+  const g   = p.gp > 0 ? p.gp : 1;              /* season totals from per-game rates */
+  const fga = Math.max(p.fga, 0) * g, tpa = Math.max(p.tpa, 0) * g;
+  const fgm = Math.max(p.fgm, 0) * g, tpm = Math.max(p.tpm, 0) * g;
+  const a2  = Math.max(fga - tpa, 0), m2 = fgm - tpm;
+
+  const mix = shrinkRate(tpa, fga, MIX_K, MIX_P);   /* 3PA share of his attempts */
+  const q3  = shrinkRate(tpm, tpa, Q3_K,  Q3_P);
+  const q2  = shrinkRate(m2,  a2,  Q2_K,  Q2_P);
   return {
-    r3: p.fga > 0 ? p.tpa / p.fga : 0,
-    q3: p.tpa > 0.0001 ? p.tpm / p.tpa : null,
-    /* one row in the league implies a negative 2PM; clamp rather than emit < 0 */
-    q2: a2  > 0.0001 ? Math.min(1, Math.max(0, m2 / a2)) : null,
+    r3:mix.v, q3:q3.v, q2:q2.v,
+    mixI:mix, q3I:q3, q2I:q2,                        /* kept for the audit table */
+    /* two league rows imply a negative 2PM; shrinkRate clamps, we still flag it */
     neg: a2 > 0.0001 && m2 < -0.0001
   };
 }
@@ -633,23 +736,21 @@ function calc(players, mins){
   const W = rows.reduce((t,x)=>t+x.w, 0);
   if (!rows.length || W <= 0) return null;
 
-  let m2=0, x2=0, m3=0, x3=0, fga=0, estW=0, noMin=0, thin=0;
+  let m2=0, x2=0, m3=0, x3=0, fga=0, estW=0, noMin=0, thin=0, bad=0;
   rows.forEach(row=>{
     row.prob = row.w / W;                            /* shooter probability */
     const {r3,q3,q2} = row.s, s = row.prob;
-    /* a branch with an undefined rate contributes attempts but no make/miss split */
-    if (q3 != null){ row.c3m = s*r3*q3;     row.c3x = s*r3*(1-q3); }
-    else           { row.c3m = 0;           row.c3x = s*r3; }
-    if (q2 != null){ row.c2m = s*(1-r3)*q2; row.c2x = s*(1-r3)*(1-q2); }
-    else           { row.c2m = 0;           row.c2x = s*(1-r3); }
+    row.c3m = s*r3*q3;       row.c3x = s*r3*(1-q3);
+    row.c2m = s*(1-r3)*q2;   row.c2x = s*(1-r3)*(1-q2);
     m3+=row.c3m; x3+=row.c3x; m2+=row.c2m; x2+=row.c2x;
     fga += row.a.adj;                                /* ΣFGA/40 sanity readout */
     if (row.p.src !== 'torvik') estW += row.prob;
     if (row.a.noMin) noMin++;
-    if (row.a.conf < 0.5) thin++;
+    if (row.a.bad) bad++;
+    else if (row.a.conf < 0.5) thin++;
   });
 
-  return { rows, fga, noMin, thin, estShare:estW,
+  return { rows, fga, noMin, thin, bad, estShare:estW,
            made2:m2, miss2:x2, made3:m3, miss3:x3,
            p2a:m2+x2, p3a:m3+x3, make:m2+m3, miss:x2+x3,
            /* kept for the existing delta/label call sites */
@@ -1076,15 +1177,26 @@ function Panel(host, initialTeam, label){
   /* ---- AUDIT — off by default, one row per selected player ---------------
      Every number the tree used, plus the three identities.  Present so the
      price can be reconstructed by hand from the display alone.            */
+  /* one shrunk rate as "raw → adjusted (n)".  Shows the pull, so it is obvious
+     when a number is the player's own and when it is mostly the league's.     */
+  function ra(I, dp){
+    const adj = '<b>'+pct(I.v,dp)+'</b>';
+    const raw = I.raw == null ? 'n/a' : pct(I.raw,dp);
+    return adj + '<div class="aq">'+raw+'<span class="an">'+n0(I.att)+'</span></div>';
+  }
+
   function auditBlock(r){
     if (!audit) return '';
     let h = '<div class="audit">'
       + '<div class="atitle">Audit · '
       +   'shooter prob = adjusted FGA/40 normalised over the five · '
-      +   'K=' + SHRINK_K + ' min, prior=' + PRIOR_FGA40 + ' FGA/40</div>'
+      +   'each rate shrunk on its own sample: volume K=' + VOL_K + ' min toward a '
+      +   'role prior, mix K=' + MIX_K + ' FGA, 3P% K=' + Q3_K + ' 3PA, 2P% K=' + Q2_K + ' 2PA'
+      +   '<span class="ashow">raw → adjusted</span></div>'
       + '<div class="cbd-flush"><table class="atab"><thead><tr>'
-      + '<th class="l">Player</th><th>Hist min</th><th>Raw /40</th><th>Adj /40</th>'
-      + '<th>Conf</th><th class="gs">Shooter</th><th>3PA sh</th><th>2P%</th><th>3P%</th>'
+      + '<th class="l">Player</th><th>Hist min</th><th>Raw /40</th><th>Role pr</th>'
+      + '<th>Adj /40</th><th>Conf</th><th class="gs">Shooter</th>'
+      + '<th>3PA sh</th><th>2P%</th><th>3P%</th>'
       + '<th class="gs">→made2</th><th>→miss2</th><th>→made3</th><th>→miss3</th>'
       + '</tr></thead><tbody>';
 
@@ -1093,17 +1205,19 @@ function Panel(host, initialTeam, label){
       const proj = mins[x.p.id];
       h += '<tr>'
         + '<td class="l">'+esc(x.p.name)
-        +   (a.conf<0.5?' <span class="badge b-wn" title="thin sample — rate pulled toward the league prior">THIN</span>':'')
+        +   (a.bad?' <span class="badge b-no" title="sheet row is impossible (attempts/makes out of range) — priced off league averages only">BAD</span>'
+             :a.conf<0.5?' <span class="badge b-wn" title="thin sample — rate pulled toward the league prior">THIN</span>':'')
         +   (proj!==undefined?' <span class="badge b-est" title="projected MIN '+proj+' is ignored for pricing">PROJ</span>':'')
         + '</td>'
         + '<td>'+(a.noMin?'—':n0(a.totMin))+'</td>'
         + '<td>'+(a.raw==null?'—':n1(a.raw))+'</td>'
+        + '<td>'+n1(a.prior)+'</td>'
         + '<td>'+n1(a.adj)+'</td>'
         + '<td>'+a.conf.toFixed(2)+'</td>'
         + '<td class="gs b">'+pct(x.prob,1)+'</td>'
-        + '<td>'+pct(s.r3,0)+'</td>'
-        + '<td>'+(s.q2==null?'n/a':pct(s.q2,1))+(s.neg?' <span class="badge b-wn" title="sheet implies negative 2PM; clamped to 0">!</span>':'')+'</td>'
-        + '<td>'+(s.q3==null?'n/a':pct(s.q3,1))+'</td>'
+        + '<td>'+ra(s.mixI, 0)+'</td>'
+        + '<td>'+ra(s.q2I, 1)+(s.neg?' <span class="badge b-wn" title="sheet implies negative 2PM; clamped to 0">!</span>':'')+'</td>'
+        + '<td>'+ra(s.q3I, 1)+'</td>'
         + '<td class="gs">'+pct(x.c2m,2)+'</td>'
         + '<td>'+pct(x.c2x,2)+'</td>'
         + '<td>'+pct(x.c3m,2)+'</td>'
@@ -1148,13 +1262,18 @@ function Panel(host, initialTeam, label){
     if (r && r.estShare>0.02)
       out.push(['w','<b>'+pct(r.estShare,0)+'</b> of lineup FGA is estimated from the sheet '
         + '(±~3pts on frequency).']);
+    if (r && r.bad)
+      out.push(['e','<b>'+r.bad+' selected row'+(r.bad>1?'s are':' is')+' unusable</b> — '
+        + 'the sheet gives impossible attempt/make totals, so '+(r.bad>1?'they are':'it is')
+        + ' priced off league averages only. Treat this lineup as a placeholder.']);
     if (r && r.noMin)
       out.push(['w', r.noMin+' player'+(r.noMin>1?'s':'')+' lack historical minutes — '
-        + 'attempt rate falls back to the league prior ('+PRIOR_FGA40+' FGA/40).']);
+        + 'attempt rate falls back to the league average ('+VOL_NOMIN+' FGA/40).']);
     if (r && r.thin)
-      out.push(['w','<b>'+r.thin+' thin sample'+(r.thin>1?'s':'')+'</b> — under '+SHRINK_K
-        + ' historical minutes, so the attempt rate is pulled toward the league average. '
-        + 'Shot-type accuracy is NOT shrunk and stays noisy on small samples.']);
+      out.push(['w','<b>'+r.thin+' thin sample'+(r.thin>1?'s':'')+'</b> — under '+VOL_K
+        + ' historical minutes. Volume is pulled toward what players in that role '
+        + 'shoot, and shot-type accuracy toward the league rate, so a thin player '
+        + 'stays near average instead of extreme. Open <b>Audit</b> to see the pull.']);
     warns.forEach(p=>out.push(['e','<b>'+esc(p.name)+'</b> — '+esc(p.warn)]));
     if (!out.length) return '';
     return '<div class="notes">'
